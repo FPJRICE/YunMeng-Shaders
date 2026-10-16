@@ -1,0 +1,22 @@
+YUNMENG SHADERS (云梦)
+Copyright (c) 2026 YunMeng Shaders Contributors
+License: GPL-3.0-only
+
+Except for third-party material identified in THIRD_PARTY_NOTICES.txt, all
+original YunMeng Shaders material in this pack is licensed under the GNU
+General Public License, version 3 only. This includes shader code, pipeline
+configuration, language files, and original textures and artwork in
+shaders/textures/.
+
+You may use, modify, and redistribute this material, including commercially,
+under GPLv3. If you incorporate it into another distributed work, comply with
+the GPLv3 terms that apply to that work. Preserve the copyright, attribution,
+and license notices supplied with the material, including the YunMeng Shaders
+Contributors credit. Mark modifications and meet the other GPLv3 requirements.
+
+The complete GPLv3 license is in COPYING:
+https://www.gnu.org/licenses/gpl-3.0.html
+
+Third-party material retains its own applicable rights and notices. Preserve
+the credits and license notices in THIRD_PARTY_NOTICES.txt. This license grants
+only rights held by the YunMeng Shaders contributors.

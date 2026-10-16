@@ -1,0 +1,129 @@
+# YunMeng Shaders (云梦) — Guofeng Ink & Xianxia Mist Shader Pack — Performance Presets, Style Toggle & Open-Source License
+profile.LOW=§7Low
+profile.MEDIUM=§aMedium
+profile.HIGH=§bHigh
+profile.ULTRA=§dUltra
+
+screen.SKY_ATMOSPHERE=Sky & Atmosphere
+screen.LIGHTING_SHADOWS=Lighting & Shadows
+screen.WATER_SETTINGS=Water
+screen.WIND_FOLIAGE=Wind & Foliage
+screen.CAMERA_SETTINGS=Camera & Post-processing
+
+option.STYLE_SELECTION=Style
+value.STYLE_SELECTION.0=§2Guofeng Ink
+value.STYLE_SELECTION.1=§bXianxia Mist
+option.STYLE_SELECTION.comment=Switches between §2Guofeng Ink§r (Qinglü Shanshui mineral-pigment wash on warm Xuan paper) and §bXianxia Mist§r (cinematic azure skies, jade foliage & luminous sea of clouds).
+
+option.CLOUD_TYPE=Clouds
+value.CLOUD_TYPE.0=Auto (By Style)
+value.CLOUD_TYPE.1=Shanshui 3D
+value.CLOUD_TYPE.2=Cumulus 3D
+value.CLOUD_TYPE.3=Off
+option.CLOUD_TYPE.comment=Controls the 3D volumetric cloud engine extending seamlessly from overhead to the horizon.
+
+option.NIGHT_AURORA=Night Aurora
+value.NIGHT_AURORA.0=Auto (By Style)
+value.NIGHT_AURORA.1=Xianxia Celestial
+value.NIGHT_AURORA.2=Guofeng Jade Silk
+value.NIGHT_AURORA.3=Off
+option.NIGHT_AURORA.comment=Renders a 3D tilted celestial aurora curtain & twinkling stardust stream across the night sky.
+
+option.INK_OUTLINES=Outlines
+value.INK_OUTLINES.0=Auto (By Style)
+value.INK_OUTLINES.1=Subtle
+value.INK_OUTLINES.2=Shanshui
+value.INK_OUTLINES.3=Off
+option.INK_OUTLINES.comment=Camera-invariant interior silhouette brush outlines on foreground solid geometry.
+
+option.LICENSE_INFO=About / License
+value.LICENSE_INFO.0=§aGPL-3.0 Shader & Art
+option.LICENSE_INFO.comment=§aGPL-3.0-only: original shader code and textures.§r §7Reuse, modify, and redistribute under GPLv3. Keep YunMeng contributor credits and third-party notices. See LICENSE.txt.§r
+
+option.FOG_DENSITY=Mist Density
+option.FOG_DENSITY.comment=Adjusts the thickness of distant atmospheric mist and the Valley Sea of Clouds.
+
+option.LIGHT_SHAFTS=God Rays
+value.LIGHT_SHAFTS.0=Off
+value.LIGHT_SHAFTS.1=Soft Rays
+value.LIGHT_SHAFTS.2=Volumetric
+option.LIGHT_SHAFTS.comment=Volumetric shadow-mapped crepuscular rays through trees, mist, and underwater caustics.
+
+option.WATER_REFLECTIONS=Reflections
+value.WATER_REFLECTIONS.0=Sky Only
+value.WATER_REFLECTIONS.1=Fast SSR
+value.WATER_REFLECTIONS.2=Full SSR
+
+option.BIOME_TINT_STRENGTH=Biome Atmosphere Tint
+option.SUN_SIZE=Sun & Moon Size
+option.SUN_LENS_FLARE=Sun Lens Flare
+value.SUN_LENS_FLARE.0=Off
+value.SUN_LENS_FLARE.1=Soft
+value.SUN_LENS_FLARE.2=Full
+option.SUN_LENS_FLARE.comment=Two thin, view-dependent rainbow arcs and two matching lens ghosts around a visible sun. Fades near screen edges, behind terrain, and in rain.
+option.SEA_OF_CLOUDS_ALTITUDE=Mist Altitude
+option.SEA_OF_CLOUDS_THICKNESS=Mist Height
+option.shadowMapResolution=Shadow Resolution
+option.shadowDistance=Shadow Distance
+option.WATER_FOAM_INTENSITY=Shore Foam
+option.WATER_WAVE_HEIGHT=Wave Height
+option.CAUSTICS_STRENGTH=Caustics
+option.WIND_SPEED=Wind Speed
+option.WAVING_BAMBOO=Wave Bamboo
+option.WAVING_SUGARCANE=Wave Reeds
+option.WAVING_LEAVES=Wave Leaves
+option.WAVING_GRASS=Wave Grass
+
+option.CLOUD_QUALITY=Cloud Quality
+value.CLOUD_QUALITY.0=Low
+value.CLOUD_QUALITY.1=Medium
+value.CLOUD_QUALITY.2=High
+value.CLOUD_QUALITY.3=Ultra
+option.CLOUD_QUALITY.comment=Balances cloud detail and rendering cost.
+option.SHADOW_FILTER_QUALITY=Shadow Filtering
+value.SHADOW_FILTER_QUALITY.0=Low
+value.SHADOW_FILTER_QUALITY.1=Medium
+value.SHADOW_FILTER_QUALITY.2=High
+option.FOAM_QUALITY=Shore Foam Quality
+value.FOAM_QUALITY.0=Low
+value.FOAM_QUALITY.1=Medium
+value.FOAM_QUALITY.2=High
+option.FOAM_QUALITY.comment=Controls shoreline sampling detail.
+
+option.SUN_SIZE.comment=Scales the sun and moon together, including their artwork and rings.
+option.BIOME_TINT_STRENGTH.comment=Controls biome-dependent atmosphere colors. Does not directly change block texture tint.
+option.shadowMapResolution.comment=Higher resolution sharpens shadow detail and uses more GPU memory.
+option.shadowDistance.comment=Shadow rendering distance in blocks. Larger distances cost more and spread the shadow map over a wider area.
+option.SHADOW_FILTER_QUALITY.comment=Controls shadow filtering samples. Higher settings soften edges at a higher rendering cost.
+option.WIND_SPEED.comment=Shared animation speed for foliage, water waves and shoreline foam.
+option.WAVING_SUGARCANE.comment=Animates reeds and related mapped plants, including their shadows.
+option.VIGNETTE_STRENGTH=Vignette Strength
+option.VIGNETTE_STRENGTH.comment=Screen-edge shading: silk tint in Guofeng, cinematic darkening in Xianxia, and underwater darkening. 0 disables; 1 retains the original look.
+option.EXPOSURE=Exposure Adjustment
+option.EXPOSURE.comment=Adjusts brightness before the existing tone curve. 0 retains the original look. This is manual artistic exposure, not automatic adaptation.
+option.SATURATION=Saturation
+option.SATURATION.comment=Adjusts color intensity relative to the selected style. 1 retains its original colors.
+option.PAINTERLY_WASH_STRENGTH=Painterly Wash
+option.PAINTERLY_WASH_STRENGTH.comment=Guofeng only: blends nearby surface colors for a painted appearance. 0 disables; 1 retains the original wash.
+option.PAPER_GRAIN_STRENGTH=Paper Grain
+option.PAPER_GRAIN_STRENGTH.comment=Guofeng only: controls the fine paper texture. 0 disables; 1 retains the original texture.
+option.UNDERWATER_DISTORTION_STRENGTH=Underwater Distortion
+option.UNDERWATER_DISTORTION_STRENGTH.comment=Controls the underwater screen ripple. 0 disables; 1 retains the original ripple. Does not change water fog or light rays.
+value.VIGNETTE_STRENGTH.0.00=Off
+value.PAINTERLY_WASH_STRENGTH.0.00=Off
+value.PAPER_GRAIN_STRENGTH.0.00=Off
+value.UNDERWATER_DISTORTION_STRENGTH.0.00=Off
+
+option.ANTI_ALIASING=Anti-aliasing
+value.ANTI_ALIASING.0=Off
+value.ANTI_ALIASING.1=Subtle
+value.ANTI_ALIASING.2=Smooth
+option.ANTI_ALIASING.comment=Spatial edge smoothing for both styles. Guofeng keeps more ink detail. No temporal history; distant shimmer may remain. Off retains the original presentation.
+option.MOTION_BLUR=Camera Motion Blur
+value.MOTION_BLUR.0=Off
+value.MOTION_BLUR.1=Fast
+value.MOTION_BLUR.2=Smooth
+option.MOTION_BLUR.comment=Blurs camera movement with depth-edge rejection and held-item protection. Smooth uses more samples. Does not calculate separate motion for moving mobs or waving plants.
+option.MOTION_BLUR_STRENGTH=Motion Blur Strength
+option.MOTION_BLUR_STRENGTH.comment=Controls the camera shutter effect. 0 disables the visible blur; switch Camera Motion Blur to Off to skip its render pass entirely.
+value.MOTION_BLUR_STRENGTH.0.00=Off
