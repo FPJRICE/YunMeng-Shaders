@@ -1,6 +1,6 @@
 #version 330 compatibility
 /* =============================================================================
- * gbuffers_terrain.fsh — Wuxia Material Classification Pass (Iris 1.26.3)
+ * gbuffers_terrain.fsh — YunMeng material classification pass
  * ============================================================================= */
 
 in vec2 vTexCoord;

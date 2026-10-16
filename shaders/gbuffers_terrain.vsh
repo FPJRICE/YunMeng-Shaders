@@ -1,6 +1,6 @@
 #version 330 compatibility
 /* =============================================================================
- * gbuffers_terrain.vsh — Wuxia Foliage & Bamboo Wind Pass (Iris 1.26.3)
+ * gbuffers_terrain.vsh — YunMeng foliage and bamboo wind pass
  * ============================================================================= */
 
 #define STYLE_SELECTION 1  // [0 1] 0: Guofeng Ink, 1: Xianxia Mist

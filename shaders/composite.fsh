@@ -1,7 +1,7 @@
 #version 330 compatibility
 // Build 2 performance update: scalable cloud, shadow and shoreline settings.
 /* =============================================================================
- * composite.fsh — Lighting, Colored Cast Shadows, SSR & Wuxia Canvas Grading
+ * composite.fsh — Lighting, colored shadows, SSR, and style grading
  * Modified 2026-10-15: Xianxia above-water bottom shadows and lighter caustics.
  * Build 2: depth absorption in both styles after blending, before reflections.
  * ============================================================================= */
