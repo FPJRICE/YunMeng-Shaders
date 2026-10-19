@@ -1,4 +1,5 @@
 #version 330 compatibility
+#include "/lib/temporal_jitter.glsl"
 // Build 2 performance update: scalable cloud, shadow and shoreline settings.
 /* =============================================================================
  * composite1.fsh — Unified 3D Volumetric Cloud Engine, Atmosphere & Night Sky
@@ -32,6 +33,7 @@ flat in float vNightFactor;
 uniform sampler2D colortex0;
 uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
+uniform sampler2D depthtex1;
 uniform sampler2D shadowtex1;
 uniform sampler2D noisetex;
 uniform sampler2D celestialTex;
@@ -47,6 +49,8 @@ uniform mat4 shadowProjection;
 
 uniform vec3 cameraPosition;
 uniform float frameTimeCounter;
+uniform float viewHeight;
+uniform float viewWidth;
 uniform float far;
 uniform float near;
 uniform float rainStrength;
@@ -154,7 +158,7 @@ float interleavedGradientNoise(vec2 pixelCoord) {
 }
 
 vec3 reconstructViewPos(vec2 uv, float depth) {
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 ndc = vec4((uv - cameraJitter(frameCounter, vec2(viewWidth, viewHeight))) * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec4 viewPos = gbufferProjectionInverse * ndc;
     return viewPos.xyz / max(viewPos.w, 1e-6);
 }
@@ -938,7 +942,7 @@ vec3 renderSunLensFlare(vec2 uv) {
     // Project a direction (w=0), so camera translation cannot move the flare.
     vec4 sunClip = gbufferProjection * vec4(vSunViewDir, 0.0);
     if (sunClip.w <= 0.0 || vSunWorldDir.y <= -0.03) return vec3(0.0);
-    vec2 sunUV = sunClip.xy / sunClip.w * 0.5 + 0.5;
+    vec2 sunUV = sunClip.xy / sunClip.w * 0.5 + 0.5 + cameraJitter(frameCounter, vec2(viewWidth, viewHeight));
     if (any(lessThan(sunUV, vec2(0.0))) || any(greaterThan(sunUV, vec2(1.0)))) return vec3(0.0);
 
     float edgeFade = smoothstep(0.0, 0.10, sunUV.x) * smoothstep(0.0, 0.10, sunUV.y) *
@@ -1076,8 +1080,19 @@ void main() {
         finalRadiance = mix(finalRadiance, cloudColorOverCelestial, cloudPunchAlpha);
     }
 
-    vec3 godRays = computeVolumetricLightShafts(viewPos, depth0, cosTheta);
-    finalRadiance += godRays;
+    vec3 shaftViewPos = viewPos;
+    float shaftDepth = depth0;
+    float shaftMaterial = texture(colortex1, vTexCoord).a;
+    // Glass transmits light; integrate air up to the opaque surface behind it.
+    if (abs(shaftMaterial - 0.90) >= 0.05 && abs(shaftMaterial - 0.12) >= 0.007) {
+        float opaqueDepth = texture(depthtex1, vTexCoord).r;
+        if (opaqueDepth > depth0) {
+            shaftDepth = opaqueDepth;
+            shaftViewPos = reconstructViewPos(vTexCoord, shaftDepth);
+        }
+    }
+    vec3 lightShafts = computeVolumetricLightShafts(shaftViewPos, shaftDepth, cosTheta);
+    finalRadiance += lightShafts;
 #if SUN_LENS_FLARE > 0
     finalRadiance += renderSunLensFlare(vTexCoord);
 #endif

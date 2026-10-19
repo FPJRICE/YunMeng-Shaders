@@ -9,7 +9,8 @@ The current source is **0.1.0 Alpha 4**. Visuals and performance are still being
 - Dynamic skies, volumetric clouds, valley mist, moon phases, and auroras
 - Lighting, shadows, light shafts, and wind-animated foliage
 - Water waves, depth-tinted transparency, reflections, foam, caustics, and underwater atmosphere
-- View-dependent sun lens flare, spatial anti-aliasing, and camera motion blur
+- View-dependent sun lens flare and atmospheric light shafts through openings and glass windows
+- Spatial or temporal anti-aliasing, with camera and foliage motion blur and estimated entity motion in Smooth mode
 - Low, Medium, High, and Ultra quality presets with separate style and effect controls
 
 The defaults are Medium quality, Subtle anti-aliasing, Fast motion blur at 0.50 strength, and Soft sun lens flare.

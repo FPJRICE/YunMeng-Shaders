@@ -1,4 +1,6 @@
 #version 330 compatibility
+#include "/lib/temporal_jitter.glsl"
+#include "/lib/camera_options.glsl"
 // Modified 2026-10-15: extended Guofeng and Xianxia above-water depth-color ramps.
 /* =============================================================================
  * gbuffers_water.fsh — Surface-aligned water normals and depth absorption.
@@ -28,13 +30,19 @@ uniform mat4 gbufferProjection;
 uniform mat4 gbufferProjectionInverse;
 uniform vec3 cameraPosition;
 uniform float frameTimeCounter;
+uniform int frameCounter;
 uniform float near;
 uniform float far;
 uniform float viewWidth;
 uniform float viewHeight;
 uniform int isEyeInWater;
 
+#if MOTION_BLUR > 0 || ANTI_ALIASING == 3
+/* RENDERTARGETS: 0,1,2,5 */
+layout(location = 3) out vec4 outMotion;
+#else
 /* RENDERTARGETS: 0,1,2 */
+#endif
 layout(location = 0) out vec4 outColor0;
 layout(location = 1) out vec4 outColor1;
 layout(location = 2) out vec4 outColor2;
@@ -44,7 +52,7 @@ float linearizeDepth(float d) {
 }
 
 vec3 reconstructViewPos(vec2 uv, float depth) {
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 ndc = vec4((uv - cameraJitter(frameCounter, vec2(viewWidth, viewHeight))) * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec4 viewPos = gbufferProjectionInverse * ndc;
     return viewPos.xyz / max(viewPos.w, 1e-6);
 }
@@ -120,6 +128,9 @@ vec3 evaluateFilteredWaveField(vec2 wp, float time, float viewDist) {
 }
 
 void main() {
+#if MOTION_BLUR > 0 || ANTI_ALIASING == 3
+    outMotion = vec4(0.0);
+#endif
     vec4 texSample = texture(gtexture, vTexCoord);
     if (texSample.a < 0.05) {
         discard;

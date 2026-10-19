@@ -1,4 +1,5 @@
 #version 330 compatibility
+#include "/lib/temporal_jitter.glsl"
 // Build 2 performance update: scalable cloud, shadow and shoreline settings.
 /* =============================================================================
  * composite.fsh — Lighting, colored shadows, SSR, and style grading
@@ -50,6 +51,9 @@ uniform vec3 cameraPosition;
 uniform vec3 skyColor;
 uniform vec3 fogColor;
 uniform float frameTimeCounter;
+uniform float viewHeight;
+uniform float viewWidth;
+uniform int frameCounter;
 uniform float rainStrength;
 uniform float wetness;
 uniform float near;
@@ -75,7 +79,7 @@ float linearizeDepth(float d) {
 }
 
 vec3 reconstructViewPos(vec2 uv, float depth) {
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 ndc = vec4((uv - cameraJitter(frameCounter, vec2(viewWidth, viewHeight))) * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec4 viewPos = gbufferProjectionInverse * ndc;
     return viewPos.xyz / max(viewPos.w, 1e-6);
 }
@@ -334,7 +338,7 @@ vec3 computeWaterSurfaceReflection(
             vec4 clipProj = gbufferProjection * vec4(marchPos, 1.0);
             if (clipProj.w <= 0.01) break;
             vec3 ndcProj  = clipProj.xyz / clipProj.w;
-            vec2 uvProj   = ndcProj.xy * 0.5 + 0.5;
+            vec2 uvProj   = ndcProj.xy * 0.5 + 0.5 + cameraJitter(frameCounter, vec2(viewWidth, viewHeight));
 
             // Stop if ray leaves screen
             if (uvProj.x < 0.005 || uvProj.x > 0.995 || uvProj.y < 0.005 || uvProj.y > 0.995) {
@@ -464,7 +468,7 @@ float computeCompositeShoreFoam(vec3 waterViewPos, vec3 waterWorldPos,
             vec3 probeView = waterViewPos + mat3(gbufferModelView) * worldOffset;
             vec4 clip = gbufferProjection * vec4(probeView, 1.0);
             if (clip.w <= 0.0) continue;
-            vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+            vec2 uv = clip.xy / clip.w * 0.5 + 0.5 + cameraJitter(frameCounter, vec2(viewWidth, viewHeight));
             if (any(lessThanEqual(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) continue;
             ivec2 pixel = clamp(ivec2(uv * vec2(screenSize)), ivec2(0), screenSize - 1);
             vec4 bankNormalTag = texelFetch(colortex1, pixel, 0);

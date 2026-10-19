@@ -1,4 +1,5 @@
 #version 330 compatibility
+#include "/lib/camera_vertex.glsl"
 /* =============================================================================
  * gbuffers_water.vsh — Watertight Distance-Attenuated Water Vertex Displacement
  * ============================================================================= */
@@ -82,4 +83,5 @@ void main() {
     vPlayerPos = playerPos.xyz;
     vWorldPos  = undisplacedWorldPos;
     gl_Position = gbufferProjection * (gbufferModelView * playerPos);
+    applyCameraJitter(gl_Position);
 }

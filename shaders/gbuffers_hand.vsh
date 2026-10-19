@@ -1,4 +1,5 @@
 #version 330 compatibility
+#include "/lib/camera_vertex.glsl"
 out vec2 vTexCoord;
 out vec2 vLmCoord;
 out vec3 vViewNormal;

@@ -34,7 +34,7 @@ vec3 spatialAA(vec2 uv) {
     // No stable edge direction: preserve fine checks and isolated ink marks.
     if (g < contrast * 0.15) return c;
     vec2 tangent = vec2(-gradient.y,gradient.x) / g;
-    float radius = (ANTI_ALIASING == 1) ? 0.75 : 1.25;
+    float radius = (ANTI_ALIASING == 2) ? 1.25 : 0.75;
     vec3 filtered = (preparedLinear(pixel+tangent*radius) + preparedLinear(pixel-tangent*radius))*0.5;
     float fl = aaLuma(filtered);
     if (fl < lo || fl > hi) return c;
