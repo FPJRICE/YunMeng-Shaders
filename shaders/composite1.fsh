@@ -9,7 +9,7 @@
 #define CLOUD_TYPE 0                  // [0 1 2 3] 0: Auto (By Style), 1: Shanshui 3D, 2: Cumulus 3D, 3: Off
 #define NIGHT_AURORA 0                // [0 1 2 3] 0: Auto (By Style), 1: Xianxia Celestial, 2: Guofeng Jade Silk, 3: Off
 #define FOG_DENSITY 1.00              // [0.25 0.50 0.75 1.00 1.15 1.25 1.50 1.80 2.20]
-#define LIGHT_SHAFTS 1                // [0 1 2] 0: Off, 1: Soft Rays, 2: Volumetric
+#define LIGHT_SHAFTS 1                // [0 1 2] 0: Off, 1: Soft, 2: Full
 #define BIOME_TINT_STRENGTH 1.00      // [0.00 0.50 0.75 1.00 1.15 1.25 1.50]
 #define SEA_OF_CLOUDS_ALTITUDE 76.0   // [56.0 68.0 76.0 88.0 104.0 120.0]
 #define SEA_OF_CLOUDS_THICKNESS 22.0  // [12.0 18.0 22.0 28.0 36.0]
@@ -30,6 +30,7 @@ flat in float vSunsetFactor;
 flat in float vNightFactor;
 
 uniform sampler2D colortex0;
+uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
 uniform sampler2D shadowtex1;
 uniform sampler2D noisetex;
@@ -865,15 +866,22 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
     #if LIGHT_SHAFTS == 0
     return vec3(0.0);
     #else
-    if (cosTheta <= 0.0) return vec3(0.0);
+    float maxRayDist = min(length(viewPos), 140.0);
+    float sourceVisibility = smoothstep(0.0, 0.10, vLightWorldDir.y);
+    if (maxRayDist <= 1.0 || sourceVisibility <= 0.0) return vec3(0.0);
+    // Held items are foreground geometry, outside the atmospheric volume.
+    if (abs(texture(colortex1, vTexCoord).a - 0.12) < 0.007) return vec3(0.0);
 
     const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 12 : 6;
-    float dither = interleavedGradientNoise(gl_FragCoord.xy);
+    // Stable sampling avoids frame-to-frame noise without temporal accumulation.
+    float dither = mix(0.25, 0.75, hash12(gl_FragCoord.xy));
 
-    float maxRayDist = min(length(viewPos), 140.0);
     vec3 rayDirView = normalize(viewPos);
-    vec3 stepVecView = rayDirView * (maxRayDist / float(RAY_STEPS));
+    float stepLength = maxRayDist / float(RAY_STEPS);
+    vec3 stepVecView = rayDirView * stepLength;
     vec3 currentViewPos = stepVecView * dither;
+    float stepTransmittance = exp(-stepLength * 0.012 * min(FOG_DENSITY, 1.35));
+    float viewTransmittance = 1.0;
 
     float accumulatedShaft = 0.0;
     for (int i = 0; i < RAY_STEPS; i++) {
@@ -883,38 +891,37 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
         shadowClipPos.xyz    = distortShadowClipPos(shadowClipPos.xyz);
 
         vec3 shadowUV = shadowClipPos.xyz * 0.5 + 0.5;
-        if (shadowUV.x > 0.0 && shadowUV.x < 1.0 && shadowUV.y > 0.0 && shadowUV.y < 1.0) {
+        if (all(greaterThan(shadowUV, vec3(0.0))) && all(lessThan(shadowUV, vec3(1.0)))) {
             float shadowMapDepth = texture(shadowtex1, shadowUV.xy).r;
             float isUnoccluded = step(shadowUV.z - 0.0006, shadowMapDepth);
 
             float worldY = samplePlayerPos.y + cameraPosition.y;
             float mistDensity = exp(-max(worldY - SEA_OF_CLOUDS_ALTITUDE, 0.0) * 0.02);
-            accumulatedShaft += isUnoccluded * (0.60 + 0.40 * mistDensity);
+            float scatterWeight = viewTransmittance * (1.0 - stepTransmittance);
+            accumulatedShaft += isUnoccluded * (0.60 + 0.40 * mistDensity) * scatterWeight;
         }
+        viewTransmittance *= stepTransmittance;
         currentViewPos += stepVecView;
     }
 
-    accumulatedShaft /= float(RAY_STEPS);
-
-    float phase = min(henyeyGreensteinPhase(cosTheta, 0.68), 1.85);
-    float timeScale = mix(0.35, 1.0, vDaylightFactor);
-    // Scattering builds with path length. Normalizing the ray sample count
-    // without this factor put almost the same veil over close blocks as far fog.
-    float pathScattering = 1.0 - exp(-maxRayDist * 0.012);
-    float nearSurfaceFade = smoothstep(3.0, 18.0, maxRayDist);
-    float shaftIntensity = accumulatedShaft * phase * 0.11 * float(LIGHT_SHAFTS) *
-                           min(FOG_DENSITY, 1.35) * timeScale * pathScattering * nearSurfaceFade;
-    shaftIntensity *= smoothstep(0.0, 0.10, vLightWorldDir.y);
+    // A broad scattering component keeps shafts visible to the side of the light.
+    float forwardPhase = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.55) * 12.5663706, 3.0);
+    float phase = 0.35 + 0.65 * forwardPhase;
+    float timeScale = mix(0.75, 1.0, vDaylightFactor);
+    float nearSurfaceFade = smoothstep(1.0, 5.0, maxRayDist);
+    float weatherVisibility = 1.0 - rainStrength * 0.85;
+    float shaftIntensity = accumulatedShaft * phase * 0.075 * float(LIGHT_SHAFTS) *
+                           timeScale * nearSurfaceFade * sourceVisibility * weatherVisibility;
 
     vec3 dayShaftColor = (STYLE_SELECTION == 0)
         ? vec3(1.04, 0.82, 0.50) * 0.75
         : mix(vec3(0.98, 0.82, 0.56), vec3(0.55, 0.88, 0.76), inBambooJungle * 0.50);
     vec3 nightShaftColor = (STYLE_SELECTION == 0)
-        ? vec3(0.38, 0.52, 0.56) * 0.38
-        : vec3(0.38, 0.60, 0.88) * 0.48;
+        ? vec3(0.38, 0.52, 0.56) * 0.65
+        : vec3(0.38, 0.60, 0.88) * 0.72;
 
     vec3 shaftColor = mix(nightShaftColor, dayShaftColor, vDaylightFactor);
-    return shaftColor * clamp(shaftIntensity, 0.0, 0.42);
+    return shaftColor * clamp(shaftIntensity, 0.0, 0.32);
     #endif
 }
 

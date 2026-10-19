@@ -8,6 +8,9 @@ Added
 Changed
 - Default settings are Medium quality, Subtle anti-aliasing, and Fast motion blur at 0.50 strength.
 
+Fixed
+- Atmospheric light shafts are more visible near foliage and in moonlight, with smooth changes across viewing angles.
+
 Known limitations
 - Spatial anti-aliasing can leave distant shimmer. Motion blur follows camera movement, not individual object animation.
 - Lighting and shadows are still being refined.

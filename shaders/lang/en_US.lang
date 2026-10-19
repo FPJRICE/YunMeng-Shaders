@@ -43,11 +43,11 @@ option.LICENSE_INFO.comment=Â§aGPL-3.0-only: original shader code and textures.Â
 option.FOG_DENSITY=Mist Density
 option.FOG_DENSITY.comment=Adjusts the thickness of distant atmospheric mist and the Valley Sea of Clouds.
 
-option.LIGHT_SHAFTS=God Rays
+option.LIGHT_SHAFTS=Light Shafts
 value.LIGHT_SHAFTS.0=Off
-value.LIGHT_SHAFTS.1=Soft Rays
-value.LIGHT_SHAFTS.2=Volumetric
-option.LIGHT_SHAFTS.comment=Volumetric shadow-mapped crepuscular rays through trees, mist, and underwater caustics.
+value.LIGHT_SHAFTS.1=Soft
+value.LIGHT_SHAFTS.2=Full
+option.LIGHT_SHAFTS.comment=Sunlight and moonlight shafts in mist and underwater. Soft uses fewer samples and lower intensity; Full uses more samples and stronger shafts.
 
 option.WATER_REFLECTIONS=Reflections
 value.WATER_REFLECTIONS.0=Sky Only
