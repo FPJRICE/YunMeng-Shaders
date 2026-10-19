@@ -1,15 +1,11 @@
-YunMeng Shaders - 0.1.0 Alpha 3
-
-Added
-- Subtle and Smooth anti-aliasing.
-- Fast and Smooth camera motion blur with a strength control and protection around held items and depth edges.
-- View-dependent sun lens flare with two thin arcs and two matching lens ghosts.
+YunMeng Shaders - 0.1.0 Alpha 4
 
 Changed
-- Default settings are Medium quality, Subtle anti-aliasing, and Fast motion blur at 0.50 strength.
+- Renamed the lighting setting to Light Shafts, with Off, Soft, and Full modes.
 
 Fixed
 - Atmospheric light shafts are more visible near foliage and in moonlight, with smooth changes across viewing angles.
+- Reduced light-shaft flicker and prevented atmospheric light shafts from brightening held items.
 
 Known limitations
 - Spatial anti-aliasing can leave distant shimmer. Motion blur follows camera movement, not individual object animation.

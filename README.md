@@ -2,7 +2,7 @@
 
 云梦光影 is a Minecraft shader pack with two visual styles. **Guofeng Ink** uses soft jade and ink colors, outlines, and paper texture. **Xianxia Mist** uses richer colors, luminous skies, celestial details, and clear water.
 
-The current source is **0.1.0 Alpha 3**. Visuals and performance are still being refined.
+The current source is **0.1.0 Alpha 4**. Visuals and performance are still being refined.
 
 ## Features
 
