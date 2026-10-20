@@ -48,6 +48,8 @@ value.LIGHT_SHAFTS.0=Off
 value.LIGHT_SHAFTS.1=Soft
 value.LIGHT_SHAFTS.2=Full
 option.LIGHT_SHAFTS.comment=Sunlight and moonlight shafts in mist and underwater. Soft uses fewer samples and lower intensity; Full uses more samples and stronger shafts.
+option.ATMOSPHERIC_SHAFT_STRENGTH=Atmospheric Shaft Strength
+option.ATMOSPHERIC_SHAFT_STRENGTH.comment=Adjusts sunlight and moonlight beams in air. Does not change underwater shafts or general mist density. Direct light must reach the opening.
 
 option.WATER_REFLECTIONS=Reflections
 value.WATER_REFLECTIONS.0=Sky Only

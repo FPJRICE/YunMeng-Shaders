@@ -11,6 +11,7 @@
 #define NIGHT_AURORA 0                // [0 1 2 3] 0: Auto (By Style), 1: Xianxia Celestial, 2: Guofeng Jade Silk, 3: Off
 #define FOG_DENSITY 1.00              // [0.25 0.50 0.75 1.00 1.15 1.25 1.50 1.80 2.20]
 #define LIGHT_SHAFTS 1                // [0 1 2] 0: Off, 1: Soft, 2: Full
+#define ATMOSPHERIC_SHAFT_STRENGTH 1.00 // [0.00 0.50 0.75 1.00 1.25 1.50 2.00]
 #define BIOME_TINT_STRENGTH 1.00      // [0.00 0.50 0.75 1.00 1.15 1.25 1.50]
 #define SEA_OF_CLOUDS_ALTITUDE 76.0   // [56.0 68.0 76.0 88.0 104.0 120.0]
 #define SEA_OF_CLOUDS_THICKNESS 22.0  // [12.0 18.0 22.0 28.0 36.0]
@@ -872,49 +873,62 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
     #else
     float maxRayDist = min(length(viewPos), 140.0);
     float sourceVisibility = smoothstep(0.0, 0.10, vLightWorldDir.y);
-    if (maxRayDist <= 1.0 || sourceVisibility <= 0.0) return vec3(0.0);
+    if (maxRayDist <= 0.35 || sourceVisibility <= 0.0 || ATMOSPHERIC_SHAFT_STRENGTH <= 0.0) return vec3(0.0);
     // Held items are foreground geometry, outside the atmospheric volume.
     if (abs(texture(colortex1, vTexCoord).a - 0.12) < 0.007) return vec3(0.0);
 
-    const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 12 : 6;
+    const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 96 : 48;
     // Stable sampling avoids frame-to-frame noise without temporal accumulation.
-    float dither = mix(0.25, 0.75, hash12(gl_FragCoord.xy));
+    float dither = hash12(gl_FragCoord.xy);
 
     vec3 rayDirView = normalize(viewPos);
-    float stepLength = maxRayDist / float(RAY_STEPS);
-    vec3 stepVecView = rayDirView * stepLength;
-    vec3 currentViewPos = stepVecView * dither;
-    float stepTransmittance = exp(-stepLength * 0.012 * min(FOG_DENSITY, 1.35));
+    vec3 rayDirPlayer = mat3(gbufferModelViewInverse) * rayDirView;
+    vec3 rayOriginPlayer = gbufferModelViewInverse[3].xyz;
+    // The shadow projection is orthographic: transform the ray once per pixel.
+    vec3 shadowOrigin = (shadowProjection * (shadowModelView * vec4(rayOriginPlayer, 1.0))).xyz;
+    vec3 shadowDirection = (shadowProjection * (shadowModelView * vec4(rayDirPlayer, 0.0))).xyz;
+    float extinction = 0.012 * min(FOG_DENSITY, 1.35);
     float viewTransmittance = 1.0;
 
     float accumulatedShaft = 0.0;
+    float availableScatter = 0.0;
     for (int i = 0; i < RAY_STEPS; i++) {
-        vec3 samplePlayerPos = (gbufferModelViewInverse * vec4(currentViewPos, 1.0)).xyz;
-        vec4 shadowViewPos   = shadowModelView * vec4(samplePlayerPos, 1.0);
-        vec4 shadowClipPos   = shadowProjection * shadowViewPos;
-        shadowClipPos.xyz    = distortShadowClipPos(shadowClipPos.xyz);
+        // Quadratic cells concentrate samples around nearby windows and foliage.
+        float startFraction = float(i) / float(RAY_STEPS);
+        float endFraction = float(i + 1) / float(RAY_STEPS);
+        float cellStart = maxRayDist * startFraction * startFraction;
+        float cellEnd = maxRayDist * endFraction * endFraction;
+        float sampleDistance = mix(cellStart, cellEnd, dither);
+        float cellTransmittance = exp(-(cellEnd - cellStart) * extinction);
+        float scatterWeight = viewTransmittance * (1.0 - cellTransmittance);
+        vec3 shadowClipPos = distortShadowClipPos(shadowOrigin + shadowDirection * sampleDistance);
 
-        vec3 shadowUV = shadowClipPos.xyz * 0.5 + 0.5;
+        vec3 shadowUV = shadowClipPos * 0.5 + 0.5;
         if (all(greaterThan(shadowUV, vec3(0.0))) && all(lessThan(shadowUV, vec3(1.0)))) {
             float shadowMapDepth = texture(shadowtex1, shadowUV.xy).r;
             float isUnoccluded = step(shadowUV.z - 0.0006, shadowMapDepth);
 
-            float worldY = samplePlayerPos.y + cameraPosition.y;
+            float worldY = rayOriginPlayer.y + rayDirPlayer.y * sampleDistance + cameraPosition.y;
             float mistDensity = exp(-max(worldY - SEA_OF_CLOUDS_ALTITUDE, 0.0) * 0.02);
-            float scatterWeight = viewTransmittance * (1.0 - stepTransmittance);
-            accumulatedShaft += isUnoccluded * (0.60 + 0.40 * mistDensity) * scatterWeight;
+            float densityWeight = (0.60 + 0.40 * mistDensity) * scatterWeight;
+            accumulatedShaft += isUnoccluded * densityWeight;
+            availableScatter += densityWeight;
         }
-        viewTransmittance *= stepTransmittance;
-        currentViewPos += stepVecView;
+        viewTransmittance *= cellTransmittance;
     }
 
-    // A broad scattering component keeps shafts visible to the side of the light.
+    // Emphasize beams bounded by shadow, retaining the open-air haze level.
+    float litFraction = accumulatedShaft / max(availableScatter, 1e-5);
+    float beamContrast = 1.0 - smoothstep(0.75, 0.98, litFraction);
     float forwardPhase = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.55) * 12.5663706, 3.0);
-    float phase = 0.35 + 0.65 * forwardPhase;
+    float phase = mix(0.35 + 0.65 * forwardPhase, 0.80 + 0.50 * forwardPhase, beamContrast);
+    float beamGain = mix(1.0, (STYLE_SELECTION == 0) ? 5.0 : 6.0, beamContrast);
+    float nearbyGain = mix(1.4, 1.0, smoothstep(8.0, 32.0, maxRayDist));
     float timeScale = mix(0.75, 1.0, vDaylightFactor);
-    float nearSurfaceFade = smoothstep(1.0, 5.0, maxRayDist);
+    float nearSurfaceFade = smoothstep(0.35, 2.0, maxRayDist);
     float weatherVisibility = 1.0 - rainStrength * 0.85;
     float shaftIntensity = accumulatedShaft * phase * 0.075 * float(LIGHT_SHAFTS) *
+                           beamGain * nearbyGain * ATMOSPHERIC_SHAFT_STRENGTH *
                            timeScale * nearSurfaceFade * sourceVisibility * weatherVisibility;
 
     vec3 dayShaftColor = (STYLE_SELECTION == 0)

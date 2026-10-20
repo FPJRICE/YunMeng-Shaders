@@ -3,16 +3,17 @@ YunMeng Shaders - 0.1.0 Alpha 4
 Added
 - Optional Temporal anti-aliasing to reduce distant shimmer.
 - Foliage motion blur, with estimated entity motion in Smooth mode.
+- Independent strength control for atmospheric light shafts.
 
 Changed
 - Renamed the lighting setting to Light Shafts, with Off, Soft, and Full modes.
 
 Fixed
-- Atmospheric light shafts are more visible near foliage and in moonlight, with smooth changes across viewing angles.
+- Improved sunlight and moonlight shafts through foliage, cave openings, and glass windows, including side views and nearby beams.
 - Reduced light-shaft flicker and prevented atmospheric light shafts from brightening held items.
-- Atmospheric light shafts now extend through glass windows to the opaque surface beyond.
 
 Known limitations
+- Very narrow beams can appear grainy, especially with Soft light shafts.
 - Temporal anti-aliasing can soften fine detail or leave trails in difficult motion.
 - Estimated entity motion blur can miss hidden or visually ambiguous movement.
 - Lighting and shadows are still being refined.
