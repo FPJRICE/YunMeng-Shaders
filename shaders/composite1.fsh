@@ -888,9 +888,8 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta, fl
     if (abs(texture(colortex1, vTexCoord).a - 0.12) < 0.007) return vec3(0.0);
 
     const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 64 : 32;
-    // Stratified static Interleaved Gradient Noise pairs with the 3x3 bilateral filter
-    // in composite2 without temporal flicker or white-noise clumping.
-    float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    // Stable sampling avoids frame-to-frame noise without temporal accumulation.
+    float dither = hash12(gl_FragCoord.xy);
 
     // Start the ray outside the first-person player torso/head and held-item zone.
     float minRayDist = min(1.25, maxRayDist * 0.28);
