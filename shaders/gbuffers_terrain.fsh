@@ -36,6 +36,9 @@ float classifyMaterialTag(int id, vec3 tintedAlbedo) {
     if (id == 8200) {
         return 0.90; // Water
     }
+    if (id == 8300) {
+        return 0.16; // Clear glass
+    }
     if (id == 8106) {
         return 0.50; // Bamboo
     }

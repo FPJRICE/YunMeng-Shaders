@@ -11,11 +11,12 @@ Changed
 
 Fixed
 - Fixed an error that prevented the shader pack from loading.
-- Improved sunlight and moonlight shafts through foliage, cave openings, and glass windows, including side views and nearby beams.
-- Corrected atmospheric shadow sampling, smoothed shafts, and reduced exaggerated streaks around moving shadows and held items.
+- Restored visible sunlight and moonlight shafts around foliage, cave openings, and clear glass windows, including side views without the sun or moon on screen.
+- Prevented player shadows and held items from creating streaks or bright beams in atmospheric shafts while keeping normal ground shadows intact.
+- Kept opaque walls blocking light shafts while allowing direct light transmission through clear glass.
 
 Known limitations
-- Very narrow beams can appear grainy, especially with Soft light shafts.
+- Narrow beams can still show minor softness or dither grain at close range, especially in Soft mode.
 - Temporal anti-aliasing can soften fine detail or leave trails in difficult motion.
 - Estimated entity motion blur can miss hidden or visually ambiguous movement.
-- Lighting and shadows are still being refined.
+- Final atmospheric shaft balance across diverse biomes and builds still benefits from in-game tuning.

@@ -62,6 +62,7 @@ uniform int moonPhase;
 uniform float inBambooJungle;
 uniform float inMountainBiome;
 uniform float inCherryGrove;
+uniform float eyeSkyFactor;
 
 #if LIGHT_SHAFTS > 0
 /* RENDERTARGETS: 0,7 */
@@ -69,6 +70,7 @@ layout(location = 1) out vec4 outAtmosphericShafts;
 /*
 const int colortex7Format = RGBA16F;
 */
+const vec4 colortex7ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #else
 /* RENDERTARGETS: 0 */
 #endif
@@ -874,80 +876,110 @@ vec3 computeUnderwaterLightShafts(vec3 viewPos, vec3 lightDirWorld, float cosThe
     #endif
 }
 
-vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
+vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta, float sceneLuma) {
     #if LIGHT_SHAFTS == 0
     return vec3(0.0);
     #else
-    float maxRayDist = min(length(viewPos), 140.0);
+    const float MAX_SHAFT_RANGE = (LIGHT_SHAFTS >= 2) ? 64.0 : 52.0;
+    float maxRayDist = min(length(viewPos), MAX_SHAFT_RANGE);
     float sourceVisibility = smoothstep(0.0, 0.10, vLightWorldDir.y);
-    if (maxRayDist <= 0.35 || sourceVisibility <= 0.0 || ATMOSPHERIC_SHAFT_STRENGTH <= 0.0) return vec3(0.0);
+    if (maxRayDist <= 0.45 || sourceVisibility <= 0.0 || ATMOSPHERIC_SHAFT_STRENGTH <= 0.0) return vec3(0.0);
     // Held items are foreground geometry, outside the atmospheric volume.
     if (abs(texture(colortex1, vTexCoord).a - 0.12) < 0.007) return vec3(0.0);
 
-    const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 96 : 48;
-    // Stable sampling avoids frame-to-frame noise without temporal accumulation.
-    float dither = hash12(gl_FragCoord.xy);
+    const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 64 : 32;
+    // Stratified static Interleaved Gradient Noise pairs with the 3x3 bilateral filter
+    // in composite2 without temporal flicker or white-noise clumping.
+    float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 
+    // Start the ray outside the first-person player torso/head and held-item zone.
+    float minRayDist = min(1.25, maxRayDist * 0.28);
     vec3 rayDirView = normalize(viewPos);
     vec3 rayDirPlayer = mat3(gbufferModelViewInverse) * rayDirView;
     vec3 rayOriginPlayer = gbufferModelViewInverse[3].xyz;
     // The shadow projection is orthographic: transform the ray once per pixel.
     vec3 shadowOrigin = (shadowProjection * (shadowModelView * vec4(rayOriginPlayer, 1.0))).xyz;
     vec3 shadowDirection = (shadowProjection * (shadowModelView * vec4(rayDirPlayer, 0.0))).xyz;
-    float extinction = 0.012 * min(FOG_DENSITY, 1.35);
-    float viewTransmittance = 1.0;
+    // Shadow-map Z scale per meter along the light vector (accounts for distortShadowClipPos z *= 0.2 and * 0.5 + 0.5).
+    vec3 lightStepShadowClip = (shadowProjection * (shadowModelView * vec4(vLightWorldDir, 0.0))).xyz;
+    float oneMeterShadowZ = max(abs(lightStepShadowClip.z) * 0.1, 1e-5);
 
-    float accumulatedShaft = 0.0;
-    float availableScatter = 0.0;
+    float litScatter = 0.0;
     for (int i = 0; i < RAY_STEPS; i++) {
-        // Quadratic cells concentrate samples around nearby windows and foliage.
-        float startFraction = float(i) / float(RAY_STEPS);
-        float endFraction = float(i + 1) / float(RAY_STEPS);
-        float cellStart = maxRayDist * startFraction * startFraction;
-        float cellEnd = maxRayDist * endFraction * endFraction;
+        // Front-weighted sample distribution concentrates resolution across nearby windows,
+        // cave mouths, and foliage canopies while covering the full mid-range air volume.
+        float u0 = float(i) / float(RAY_STEPS);
+        float u1 = float(i + 1) / float(RAY_STEPS);
+        float f0 = u0 * (0.36 + 0.64 * u0);
+        float f1 = u1 * (0.36 + 0.64 * u1);
+        float cellStart = mix(minRayDist, maxRayDist, f0);
+        float cellEnd   = mix(minRayDist, maxRayDist, f1);
+        float stepLen   = cellEnd - cellStart;
         float sampleDistance = mix(cellStart, cellEnd, dither);
-        float cellTransmittance = exp(-(cellEnd - cellStart) * extinction);
-        float scatterWeight = viewTransmittance * (1.0 - cellTransmittance);
-        vec3 shadowClipPos = distortShadowClipPos(shadowOrigin + shadowDirection * sampleDistance);
 
+        vec3 shadowClipPos = distortShadowClipPos(shadowOrigin + shadowDirection * sampleDistance);
         vec3 shadowUV = shadowClipPos * 0.5 + 0.5;
-        if (all(greaterThan(shadowUV, vec3(0.0))) && all(lessThan(shadowUV, vec3(1.0)))) {
+
+        if (all(greaterThan(shadowUV, vec3(0.001))) && all(lessThan(shadowUV, vec3(0.999)))) {
             float shadowMapDepth = texture(shadowtex1, shadowUV.xy).r;
-            float isUnoccluded = step(shadowUV.z - 0.0006, shadowMapDepth);
+            float isUnoccluded = step(shadowUV.z - 0.0005, shadowMapDepth);
+
+            if (isUnoccluded < 0.5) {
+                // Reconstruct the 3D player-space position of the shadow caster along vLightWorldDir.
+                // If the caster sits inside the player's own first-person body volume, ignore the
+                // self-shadow so player movement/turning cannot cast streaks through the air.
+                float casterDist = max((shadowUV.z - shadowMapDepth) / oneMeterShadowZ, 0.0);
+                vec3 casterPlayerPos = (rayOriginPlayer + rayDirPlayer * sampleDistance) + vLightWorldDir * casterDist;
+                if (length(casterPlayerPos.xz) < 0.65 && casterPlayerPos.y > -1.80 && casterPlayerPos.y < 0.35) {
+                    isUnoccluded = 1.0;
+                }
+            }
 
             float worldY = rayOriginPlayer.y + rayDirPlayer.y * sampleDistance + cameraPosition.y;
-            float mistDensity = exp(-max(worldY - SEA_OF_CLOUDS_ALTITUDE, 0.0) * 0.02);
-            float densityWeight = (0.60 + 0.40 * mistDensity) * scatterWeight;
-            accumulatedShaft += isUnoccluded * densityWeight;
-            availableScatter += densityWeight;
+            float mistDensity = exp(-max(worldY - SEA_OF_CLOUDS_ALTITUDE, 0.0) * 0.012);
+            // Near/mid-field Tyndall kernel: a 3m..6m sunbeam through a window, cave opening,
+            // or foliage gap accumulates strong scattering without requiring a 100m path.
+            float radialWeight = exp(-sampleDistance / 14.0) * (stepLen / 4.5);
+            float densityWeight = (0.78 + 0.22 * mistDensity) * radialWeight;
+            litScatter += isUnoccluded * densityWeight;
         }
-        viewTransmittance *= cellTransmittance;
     }
 
-    // Occlusion must only reduce scattering; it must never amplify a ray.
-    // A monotonic curve keeps narrow beams readable below the fully lit level.
-    float litFraction = clamp(accumulatedShaft / max(availableScatter, 1e-5), 0.0, 1.0);
-    float visibilityCurve = (STYLE_SELECTION == 0) ? 2.5 : 3.0;
-    accumulatedShaft = availableScatter * (1.0 - exp(-visibilityCurve * litFraction)) / (1.0 - exp(-visibilityCurve));
-    float forwardPhase = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.55) * 12.5663706, 3.0);
-    float phase = 0.35 + 0.65 * forwardPhase;
-    float nearbyGain = mix(1.4, 1.0, smoothstep(8.0, 32.0, maxRayDist));
-    float timeScale = mix(0.75, 1.0, vDaylightFactor);
-    float nearSurfaceFade = smoothstep(0.35, 2.0, maxRayDist);
+    // Strictly monotonic saturation: occlusion only reduces scattering and can never amplify a ray.
+    float beamResponse = 1.0 - exp(-1.35 * litScatter * min(FOG_DENSITY, 1.35));
+
+    // Side-view friendly phase function: strong Rayleigh/isotropic side-scatter baseline so beams
+    // remain clearly visible from 60..120 deg side views when the sun/moon is off-screen.
+    float forwardMie = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.40) * 12.5663706, 2.3);
+    float phase = 0.62 + 0.36 * forwardMie;
+
+    // Smooth camera-enclosure adaptation from the global eyeSkyFactor uniform (spatially constant).
+    float enclosureGain = mix(1.24, 0.82, smoothstep(0.50, 0.95, eyeSkyFactor));
+
+    // Soft-shoulder destination luminance protection: beams pop vividly across shaded interiors,
+    // cave walls, and tree trunks while avoiding washout over bright sunlit ground or sky.
+    float skyDamp = (depth0 >= 0.999999) ? 0.55 : 1.0;
+    float surfaceContrast = (1.0 - smoothstep(0.26, 0.72, sceneLuma) * 0.76) * skyDamp;
+
+    float modeScale = (LIGHT_SHAFTS >= 2) ? 1.00 : 0.75;
+    float timeScale = mix(0.88, 1.00, vDaylightFactor);
+    float nearSurfaceFade = smoothstep(0.45, 1.80, maxRayDist);
     float weatherVisibility = 1.0 - rainStrength * 0.85;
-    float shaftIntensity = accumulatedShaft * phase * 0.075 * float(LIGHT_SHAFTS) *
-                           nearbyGain * ATMOSPHERIC_SHAFT_STRENGTH *
+
+    float shaftIntensity = beamResponse * phase * enclosureGain * surfaceContrast *
+                           0.32 * modeScale * ATMOSPHERIC_SHAFT_STRENGTH *
                            timeScale * nearSurfaceFade * sourceVisibility * weatherVisibility;
 
     vec3 dayShaftColor = (STYLE_SELECTION == 0)
-        ? vec3(1.04, 0.82, 0.50) * 0.75
-        : mix(vec3(0.98, 0.82, 0.56), vec3(0.55, 0.88, 0.76), inBambooJungle * 0.50);
+        ? mix(vec3(1.02, 0.84, 0.56), vec3(1.08, 0.64, 0.38), vSunsetFactor) * 0.88
+        : mix(mix(vec3(1.05, 0.88, 0.60), vec3(0.60, 0.94, 0.80), inBambooJungle * 0.45),
+              vec3(1.12, 0.68, 0.40), vSunsetFactor) * 0.95;
     vec3 nightShaftColor = (STYLE_SELECTION == 0)
-        ? vec3(0.38, 0.52, 0.56) * 0.65
-        : vec3(0.38, 0.60, 0.88) * 0.72;
+        ? vec3(0.52, 0.72, 0.76) * 0.86
+        : vec3(0.48, 0.76, 1.02) * 0.92;
 
     vec3 shaftColor = mix(nightShaftColor, dayShaftColor, vDaylightFactor);
-    return shaftColor * clamp(shaftIntensity, 0.0, 0.32);
+    return shaftColor * clamp(shaftIntensity, 0.0, 0.36);
     #endif
 }
 
@@ -1109,14 +1141,27 @@ void main() {
     float shaftDepth = depth0;
     float shaftMaterial = texture(colortex1, vTexCoord).a;
     // Glass transmits light; integrate air up to the opaque surface behind it.
-    if (abs(shaftMaterial - 0.90) >= 0.05 && abs(shaftMaterial - 0.12) >= 0.007) {
+    if (abs(shaftMaterial - 0.16) < 0.02) {
+        vec2 texel = 3.0 / vec2(max(viewWidth, 1.0), max(viewHeight, 1.0));
+        float bgDepth = max(
+            max(texture(depthtex1, vTexCoord + vec2(texel.x, 0.0)).r,
+                texture(depthtex1, vTexCoord - vec2(texel.x, 0.0)).r),
+            max(texture(depthtex1, vTexCoord + vec2(0.0, texel.y)).r,
+                texture(depthtex1, vTexCoord - vec2(0.0, texel.y)).r)
+        );
+        if (bgDepth > depth0) {
+            shaftDepth = bgDepth;
+            shaftViewPos = reconstructViewPos(vTexCoord, shaftDepth);
+        }
+    } else if (abs(shaftMaterial - 0.90) >= 0.05 && abs(shaftMaterial - 0.12) >= 0.007) {
         float opaqueDepth = texture(depthtex1, vTexCoord).r;
         if (opaqueDepth > depth0) {
             shaftDepth = opaqueDepth;
             shaftViewPos = reconstructViewPos(vTexCoord, shaftDepth);
         }
     }
-    vec3 lightShafts = computeVolumetricLightShafts(shaftViewPos, shaftDepth, cosTheta);
+    float sceneLuma = dot(finalRadiance, vec3(0.2126, 0.7152, 0.0722));
+    vec3 lightShafts = computeVolumetricLightShafts(shaftViewPos, shaftDepth, cosTheta, sceneLuma);
     finalRadiance += lightShafts;
 #if LIGHT_SHAFTS > 0
     outAtmosphericShafts = vec4(lightShafts, 0.0);

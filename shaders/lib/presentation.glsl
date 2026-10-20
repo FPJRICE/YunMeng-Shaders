@@ -93,7 +93,7 @@ float computeWuxiaSilhouetteOutline(vec2 unwarpedUV, vec2 texelSize, float cente
         return 0.0;
     }
     // Directly skip alpha-cutout grass/leaves/kelp (0.25), blossoms (0.75), and water (0.90) on the foreground pixel!
-    if (abs(centerMatTag - 0.25) < 0.05 || abs(centerMatTag - 0.75) < 0.05 || abs(centerMatTag - 0.90) < 0.05) {
+    if (abs(centerMatTag - 0.16) < 0.02 || abs(centerMatTag - 0.25) < 0.05 || abs(centerMatTag - 0.75) < 0.05 || abs(centerMatTag - 0.90) < 0.05) {
         return 0.0;
     }
 

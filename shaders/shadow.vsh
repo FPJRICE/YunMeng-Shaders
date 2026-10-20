@@ -20,6 +20,7 @@ uniform float frameTimeCounter;
 
 out vec2 vTexCoord;
 out vec4 vVertexColor;
+flat out int vMatId;
 
 vec3 distortShadowClipPos(vec3 shadowClipPos) {
     float dist = length(shadowClipPos.xy);
@@ -43,6 +44,7 @@ void main() {
     vVertexColor = gl_Color;
 
     int matId = int(floor(mc_Entity.x + 0.5));
+    vMatId = matId;
     vec4 clipPos = ftransform();
     vec4 playerPos = shadowModelViewInverse * (shadowProjectionInverse * clipPos);
     vec3 worldPos = playerPos.xyz + cameraPosition;
