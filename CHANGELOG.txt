@@ -7,6 +7,7 @@ Added
 
 Changed
 - Renamed the lighting setting to Light Shafts, with Off, Soft, and Full modes.
+- Refined the Guofeng Ink sun artwork.
 
 Fixed
 - Improved sunlight and moonlight shafts through foliage, cave openings, and glass windows, including side views and nearby beams.
