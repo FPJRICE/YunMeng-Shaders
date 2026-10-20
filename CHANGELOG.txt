@@ -10,7 +10,7 @@ Changed
 
 Fixed
 - Improved sunlight and moonlight shafts through foliage, cave openings, and glass windows, including side views and nearby beams.
-- Reduced light-shaft flicker and prevented atmospheric light shafts from brightening held items.
+- Smoothed atmospheric shafts, removed exaggerated streaks from player shadows, and prevented shafts from brightening held items.
 
 Known limitations
 - Very narrow beams can appear grainy, especially with Soft light shafts.

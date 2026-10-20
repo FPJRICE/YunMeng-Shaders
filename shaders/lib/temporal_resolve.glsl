@@ -89,7 +89,7 @@ vec3 resolveTemporal(ivec2 p, vec3 current, vec2 previousUV, float previousDepth
     ivec2 size = textureSize(colortex0, 0);
     vec3 lo = vec3(1e20), hi = vec3(-1e20), mean = vec3(0.0), squareMean = vec3(0.0);
     for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-        vec3 sampleValue = toTemporalColor(texelFetch(colortex0, clamp(p + ivec2(x,y), ivec2(0), size - 1), 0).rgb);
+        vec3 sampleValue = toTemporalColor(filteredAtmosphericScene(clamp(p + ivec2(x,y), ivec2(0), size - 1)));
         lo = min(lo, sampleValue); hi = max(hi, sampleValue);
         mean += sampleValue; squareMean += sampleValue * sampleValue;
     }

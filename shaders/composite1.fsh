@@ -10,8 +10,7 @@
 #define CLOUD_TYPE 0                  // [0 1 2 3] 0: Auto (By Style), 1: Shanshui 3D, 2: Cumulus 3D, 3: Off
 #define NIGHT_AURORA 0                // [0 1 2 3] 0: Auto (By Style), 1: Xianxia Celestial, 2: Guofeng Jade Silk, 3: Off
 #define FOG_DENSITY 1.00              // [0.25 0.50 0.75 1.00 1.15 1.25 1.50 1.80 2.20]
-#define LIGHT_SHAFTS 1                // [0 1 2] 0: Off, 1: Soft, 2: Full
-#define ATMOSPHERIC_SHAFT_STRENGTH 1.00 // [0.00 0.50 0.75 1.00 1.25 1.50 2.00]
+#include "/lib/atmospheric_options.glsl"
 #define BIOME_TINT_STRENGTH 1.00      // [0.00 0.50 0.75 1.00 1.15 1.25 1.50]
 #define SEA_OF_CLOUDS_ALTITUDE 76.0   // [56.0 68.0 76.0 88.0 104.0 120.0]
 #define SEA_OF_CLOUDS_THICKNESS 22.0  // [12.0 18.0 22.0 28.0 36.0]
@@ -36,6 +35,7 @@ uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
 uniform sampler2D depthtex1;
 uniform sampler2D shadowtex1;
+uniform sampler2D shadowcolor1;
 uniform sampler2D noisetex;
 uniform sampler2D celestialTex;
 uniform sampler2D guofengMoonTex;
@@ -64,7 +64,15 @@ uniform float inBambooJungle;
 uniform float inMountainBiome;
 uniform float inCherryGrove;
 
+#if LIGHT_SHAFTS > 0
+/* RENDERTARGETS: 0,7 */
+layout(location = 1) out vec4 outAtmosphericShafts;
+/*
+const int colortex7Format = RGBA16F;
+*/
+#else
 /* RENDERTARGETS: 0 */
+#endif
 layout(location = 0) out vec4 outColor0;
 
 // Hash without Sine by David Hoskins (MIT License, https://www.shadertoy.com/view/4djSRW)
@@ -905,7 +913,9 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
 
         vec3 shadowUV = shadowClipPos * 0.5 + 0.5;
         if (all(greaterThan(shadowUV, vec3(0.0))) && all(lessThan(shadowUV, vec3(1.0)))) {
-            float shadowMapDepth = texture(shadowtex1, shadowUV.xy).r;
+            ivec2 shadowSize = textureSize(shadowcolor1, 0);
+            ivec2 shadowPixel = clamp(ivec2(shadowUV.xy * vec2(shadowSize)), ivec2(0), shadowSize - 1);
+            float shadowMapDepth = texelFetch(shadowcolor1, shadowPixel, 0).r;
             float isUnoccluded = step(shadowUV.z - 0.0006, shadowMapDepth);
 
             float worldY = rayOriginPlayer.y + rayDirPlayer.y * sampleDistance + cameraPosition.y;
@@ -917,18 +927,19 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
         viewTransmittance *= cellTransmittance;
     }
 
-    // Emphasize beams bounded by shadow, retaining the open-air haze level.
-    float litFraction = accumulatedShaft / max(availableScatter, 1e-5);
-    float beamContrast = 1.0 - smoothstep(0.75, 0.98, litFraction);
+    // Occlusion must only reduce scattering; it must never amplify a ray.
+    // A monotonic curve keeps narrow beams readable below the fully lit level.
+    float litFraction = clamp(accumulatedShaft / max(availableScatter, 1e-5), 0.0, 1.0);
+    float visibilityCurve = (STYLE_SELECTION == 0) ? 2.5 : 3.0;
+    accumulatedShaft = availableScatter * (1.0 - exp(-visibilityCurve * litFraction)) / (1.0 - exp(-visibilityCurve));
     float forwardPhase = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.55) * 12.5663706, 3.0);
-    float phase = mix(0.35 + 0.65 * forwardPhase, 0.80 + 0.50 * forwardPhase, beamContrast);
-    float beamGain = mix(1.0, (STYLE_SELECTION == 0) ? 5.0 : 6.0, beamContrast);
+    float phase = 0.35 + 0.65 * forwardPhase;
     float nearbyGain = mix(1.4, 1.0, smoothstep(8.0, 32.0, maxRayDist));
     float timeScale = mix(0.75, 1.0, vDaylightFactor);
     float nearSurfaceFade = smoothstep(0.35, 2.0, maxRayDist);
     float weatherVisibility = 1.0 - rainStrength * 0.85;
     float shaftIntensity = accumulatedShaft * phase * 0.075 * float(LIGHT_SHAFTS) *
-                           beamGain * nearbyGain * ATMOSPHERIC_SHAFT_STRENGTH *
+                           nearbyGain * ATMOSPHERIC_SHAFT_STRENGTH *
                            timeScale * nearSurfaceFade * sourceVisibility * weatherVisibility;
 
     vec3 dayShaftColor = (STYLE_SELECTION == 0)
@@ -1019,6 +1030,9 @@ vec3 renderSunLensFlare(vec2 uv) {
 #endif
 
 void main() {
+#if LIGHT_SHAFTS > 0
+    outAtmosphericShafts = vec4(0.0);
+#endif
     vec4 sceneColor = texture(colortex0, vTexCoord);
     float depth0 = texture(depthtex0, vTexCoord).r;
 
@@ -1107,6 +1121,9 @@ void main() {
     }
     vec3 lightShafts = computeVolumetricLightShafts(shaftViewPos, shaftDepth, cosTheta);
     finalRadiance += lightShafts;
+#if LIGHT_SHAFTS > 0
+    outAtmosphericShafts = vec4(lightShafts, 0.0);
+#endif
 #if SUN_LENS_FLARE > 0
     finalRadiance += renderSunLensFlare(vTexCoord);
 #endif
