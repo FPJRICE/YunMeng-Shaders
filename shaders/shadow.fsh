@@ -11,7 +11,7 @@ layout(location = 1) out vec4 outAtmosphericDepth;
 /*
 const int shadowcolor1Format = R32F;
 */
-const vec4 shadowcolor1ClearColor = vec4(1.0);
+const vec4 shadowcolor1ClearColor = vec4(1.0, 1.0, 1.0, 1.0);
 const bool shadowcolor1Clear = true;
 
 void main() {
