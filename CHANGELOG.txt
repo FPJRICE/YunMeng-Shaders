@@ -12,7 +12,7 @@ Changed
 Fixed
 - Fixed an error that prevented the shader pack from loading.
 - Improved sunlight and moonlight shafts through foliage, cave openings, and glass windows, including side views and nearby beams.
-- Smoothed atmospheric shafts, removed exaggerated streaks from player shadows, and prevented shafts from brightening held items.
+- Corrected atmospheric shadow sampling, smoothed shafts, and reduced exaggerated streaks around moving shadows and held items.
 
 Known limitations
 - Very narrow beams can appear grainy, especially with Soft light shafts.

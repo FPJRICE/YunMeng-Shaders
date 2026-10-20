@@ -35,7 +35,6 @@ uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
 uniform sampler2D depthtex1;
 uniform sampler2D shadowtex1;
-uniform sampler2D shadowcolor1;
 uniform sampler2D noisetex;
 uniform sampler2D celestialTex;
 uniform sampler2D guofengMoonTex;
@@ -913,9 +912,7 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta) {
 
         vec3 shadowUV = shadowClipPos * 0.5 + 0.5;
         if (all(greaterThan(shadowUV, vec3(0.0))) && all(lessThan(shadowUV, vec3(1.0)))) {
-            ivec2 shadowSize = textureSize(shadowcolor1, 0);
-            ivec2 shadowPixel = clamp(ivec2(shadowUV.xy * vec2(shadowSize)), ivec2(0), shadowSize - 1);
-            float shadowMapDepth = texelFetch(shadowcolor1, shadowPixel, 0).r;
+            float shadowMapDepth = texture(shadowtex1, shadowUV.xy).r;
             float isUnoccluded = step(shadowUV.z - 0.0006, shadowMapDepth);
 
             float worldY = rayOriginPlayer.y + rayDirPlayer.y * sampleDistance + cameraPosition.y;
