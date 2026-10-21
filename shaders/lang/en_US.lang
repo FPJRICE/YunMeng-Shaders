@@ -55,6 +55,7 @@ option.WATER_REFLECTIONS=Reflections
 value.WATER_REFLECTIONS.0=Sky Only
 value.WATER_REFLECTIONS.1=Fast SSR
 value.WATER_REFLECTIONS.2=Full SSR
+option.WATER_REFLECTIONS.comment=Sky Only reflects the atmosphere without clouds or objects. Fast and Full add reflected volumetric clouds and screen-space objects; Full uses more samples. Off-screen objects cannot be reflected.
 
 option.BIOME_TINT_STRENGTH=Biome Atmosphere Tint
 option.SUN_SIZE=Sun & Moon Size

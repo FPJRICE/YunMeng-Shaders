@@ -107,6 +107,7 @@ vec3 resolveTemporal(ivec2 p, vec3 current, vec2 previousUV, float previousDepth
         weight = min(weight, 0.20);
     if (sky) weight = min(weight, 0.55);
     float brightnessChange = abs(dot(history-current, vec3(0.2126,0.7152,0.0722)));
-    weight /= 1.0 + brightnessChange;
+    // Rapid luminance jumps (such as thunderstorm lightning flashes) shed history immediately.
+    weight /= 1.0 + brightnessChange * (1.0 + smoothstep(0.06, 0.24, brightnessChange) * 14.0);
     return mix(current, history, weight);
 }

@@ -1,22 +1,20 @@
-YunMeng Shaders - 0.1.0 Alpha 4
+YunMeng Shaders - 0.1.0 Alpha 5
 
 Added
-- Optional Temporal anti-aliasing to reduce distant shimmer.
-- Foliage motion blur, with estimated entity motion in Smooth mode.
-- Independent strength control for atmospheric light shafts.
+- Weather-aware rain, snow, and lightning.
 
 Changed
-- Renamed the lighting setting to Light Shafts, with Off, Soft, and Full modes.
-- Refined the Guofeng Ink sun artwork.
+- Reworked clouds for both styles, with more open clear-weather skies.
+- Improved weather fog and lighting, with clearer atmospheric shafts and cloud-controlled underwater beams.
+- Improved water reflections and underwater sky visibility.
+- Refined both suns with softer sky blending and animated glow; enlarged Guofeng's sun.
 
 Fixed
-- Fixed an error that prevented the shader pack from loading.
-- Restored visible sunlight and moonlight shafts around foliage, cave openings, and clear glass windows, including side views without the sun or moon on screen.
-- Prevented player shadows and held items from creating streaks or bright beams in atmospheric shafts while keeping normal ground shadows intact.
-- Kept opaque walls blocking light shafts while allowing direct light transmission through clear glass.
+- Reduced cloud seams, cutoffs, and exposed chunk edges during weather.
+- Smoothed near-water lighting and corrected overly bright reflections.
+- Prevented light shafts from showing over players and other entities.
+- Fixed unwanted land caustics and lightning afterimages.
 
 Known limitations
-- Narrow beams can still show minor softness or dither grain at close range, especially in Soft mode.
-- Temporal anti-aliasing can soften fine detail or leave trails in difficult motion.
-- Estimated entity motion blur can miss hidden or visually ambiguous movement.
-- Final atmospheric shaft balance across diverse biomes and builds still benefits from in-game tuning.
+- In-game Iris testing is still needed, particularly for the reported near-water circle.
+- Cloud lighting remains approximate, and performance varies by scene.

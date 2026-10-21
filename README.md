@@ -2,13 +2,15 @@
 
 云梦光影 is a Minecraft shader pack with two visual styles. **Guofeng Ink** uses soft jade and ink colors, outlines, and paper texture. **Xianxia Mist** uses richer colors, luminous skies, celestial details, and clear water.
 
-The current source is **0.1.0 Alpha 4**. Visuals and performance are still being refined.
+The current release is **0.1.0-alpha.5**. This alpha refines clouds, weather fog, atmospheric and underwater light shafts, water reflections, and both illustrated suns. Compilation and controlled rendering checks have passed; broader in-game Iris compatibility and regression testing remain in progress.
 
 ## Features
 
-- Dynamic skies, volumetric clouds, valley mist, moon phases, and auroras
+- Dynamic skies, distinct volumetric cloud formations for both styles, valley mist, moon phases, and auroras
+- Illustrated suns with soft sky blending and gently animated glow, with a larger sun for Guofeng Ink
+- Atmospheric rain and snow, coordinated storm lighting, weather-aware border fog, and cloud-controlled directional illumination
 - Lighting, shadows, light shafts, and wind-animated foliage
-- Water waves, depth-tinted transparency, reflections, foam, caustics, and underwater atmosphere
+- Water waves, depth-tinted transparency, sky/cloud and object reflections, foam, caustics, and underwater atmosphere with cloud-controlled light shafts
 - View-dependent sun lens flare and atmospheric light shafts through openings and glass windows, with separate atmospheric strength control
 - Spatial or temporal anti-aliasing, with camera and foliage motion blur and estimated entity motion in Smooth mode
 - Low, Medium, High, and Ultra quality presets with separate style and effect controls
@@ -17,11 +19,16 @@ The defaults are Medium quality, Subtle anti-aliasing, Fast motion blur at 0.50 
 
 ## Install
 
-Use an individual `YunMeng_Shaders_0.1.0-alpha.N.zip` release file. Place it in your Minecraft profile's `shaderpacks` folder and select it with Iris. GitHub's automatic source archive is for source browsing, not installation. Tag Minecraft versions only after testing them; the alpha build number is the pack version, not a Minecraft version.
+Use `YunMeng_Shaders_0.1.0-alpha.5.zip` for this release. Place the ZIP in your Minecraft profile's `shaderpacks` folder and select it with Iris. GitHub's automatic source archive is for source browsing, not installation. Use the Minecraft compatibility versions listed on the download page; the alpha build number is the shader pack version.
+
+## Alpha limitations
+
+Cloud lighting and underwater light paths use approximations. Near-water transitions, weather changes, and performance still need broader in-game testing across scenes and hardware. Minecraft and Iris version compatibility should be verified before adding download-page compatibility tags.
 
 ## Source layout
 
 - `shaders/` contains GLSL programs, settings, translations, and textures.
+- `tools/generate_cloud_volume.py` regenerates the cloud density atlas using Python, NumPy, and Pillow. Development tools stay in the source repository and are excluded from installable ZIPs; the generated textures are included.
 - `CHANGELOG.txt` describes the current build.
 - `LICENSE.txt`, `COPYING`, and `THIRD_PARTY_NOTICES.txt` contain the license terms and required credits.
 

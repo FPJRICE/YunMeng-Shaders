@@ -1,6 +1,7 @@
 #version 330 compatibility
 #include "/lib/temporal_jitter.glsl"
 #include "/lib/camera_options.glsl"
+#include "/lib/water_optics.glsl"
 // Modified 2026-10-15: extended Guofeng and Xianxia above-water depth-color ramps.
 /* =============================================================================
  * gbuffers_water.fsh — Surface-aligned water normals and depth absorption.
@@ -178,6 +179,9 @@ void main() {
     float NdotVGeo = clamp(abs(dot(viewRayWorld, geoNormal)), 0.0, 1.0);
 
     float grazingDamp = mix(0.25, 1.0, NdotVGeo);
+    if (isEyeInWater == 0 && vVerticalCurtain < 0.5) {
+        grazingDamp = mix(0.55, 1.0, NdotVGeo);
+    }
     float normalStrength = (STYLE_SELECTION == 0 ? 0.09 : 0.15) * WATER_WAVE_HEIGHT * grazingDamp;
     vec3 worldWaveNormal = normalize(geoNormal - normalStrength *
         (blendedWave.x * tangent + blendedWave.y * bitangent));
@@ -190,18 +194,18 @@ void main() {
     float finalAlpha;
 
     if (isEyeInWater == 1) {
-        float snellWindow = smoothstep(0.48, 0.74, NdotV);
+        float snellWindow = waterExitTransmission(viewRayWorld,worldWaveNormal);
         if (STYLE_SELECTION == 0) {
             vec3 tirCeladon   = vec3(0.16, 0.32, 0.34);
             vec3 windowBright = vec3(0.72, 0.82, 0.78);
             finalWaterColor   = mix(tirCeladon, windowBright, snellWindow);
-            finalAlpha        = mix(0.84, 0.38, snellWindow);
+            finalAlpha        = mix(0.84, 0.20, snellWindow);
         } else {
             vec3 tirAbyssal   = vec3(0.03, 0.18, 0.28);
             vec3 windowBright = vec3(0.38, 0.78, 0.86);
             float causticRim  = smoothstep(0.45, 0.65, NdotV) * (1.0 - smoothstep(0.65, 0.80, NdotV));
             finalWaterColor   = mix(tirAbyssal, windowBright, snellWindow) + vec3(0.25, 0.65, 0.70) * causticRim;
-            finalAlpha        = mix(0.88, 0.32, snellWindow);
+            finalAlpha        = mix(0.88, 0.12, snellWindow);
         }
         outColor0 = vec4(finalWaterColor, finalAlpha);
         outColor1 = vec4(-perturbedViewNormal * 0.5 + 0.5, 0.90);
