@@ -1,5 +1,6 @@
 #ifndef YUNMENG_ATMOSPHERIC_OPTIONS
 #define YUNMENG_ATMOSPHERIC_OPTIONS
 #define LIGHT_SHAFTS 1 // [0 1 2] 0: Off, 1: Soft, 2: Full
+#define ATMOSPHERIC_SHAFT_QUALITY 1 // [0 1 2 3] Low, Medium, High, Ultra
 #define ATMOSPHERIC_SHAFT_STRENGTH 1.00 // [0.00 0.50 0.75 1.00 1.25 1.50 2.00]
 #endif

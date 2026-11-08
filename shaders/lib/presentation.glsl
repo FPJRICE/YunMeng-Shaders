@@ -8,7 +8,7 @@
 #define VIGNETTE_STRENGTH 1.00 // [0.00 0.25 0.50 0.75 1.00 1.25 1.50]
 #define EXPOSURE 0.00 // [-1.00 -0.75 -0.50 -0.25 0.00 0.25 0.50 0.75 1.00]
 #define SATURATION 1.00 // [0.00 0.25 0.50 0.75 1.00 1.10 1.25 1.50]
-#define PAINTERLY_WASH_STRENGTH 1.00 // [0.00 0.25 0.50 0.75 1.00]
+#define PAINTERLY_WASH_STRENGTH 0.00 // [0.00 0.25 0.50 0.75 1.00]
 #define PAPER_GRAIN_STRENGTH 1.00 // [0.00 0.25 0.50 0.75 1.00 1.25 1.50]
 #define UNDERWATER_DISTORTION_STRENGTH 1.00 // [0.00 0.25 0.50 0.75 1.00 1.25 1.50]
 #define LICENSE_INFO 0     // [0] 0: GPL-3.0-only (Original Code & Textures)
@@ -88,12 +88,12 @@ vec3 samplePainterlyWash(vec2 uv, vec2 texelSize, vec3 centerColor, float center
 }
 
 // Plane-compensated view-normal & depth discontinuity filter (100% camera-angle invariant!)
-float computeWuxiaSilhouetteOutline(vec2 unwarpedUV, vec2 texelSize, float centerDepthLin, vec3 viewNormal, float centerMatTag, int activeOutlineMode) {
+float computeYunMengSilhouetteOutline(vec2 unwarpedUV, vec2 texelSize, float centerDepthLin, vec3 viewNormal, float centerMatTag, int activeOutlineMode) {
     if (activeOutlineMode <= 0 || centerDepthLin >= 40.0 || centerDepthLin < 0.6) {
         return 0.0;
     }
     // Directly skip alpha-cutout grass/leaves/kelp (0.25), blossoms (0.75), and water (0.90) on the foreground pixel!
-    if (abs(centerMatTag - 0.16) < 0.02 || abs(centerMatTag - 0.25) < 0.05 || abs(centerMatTag - 0.75) < 0.05 || abs(centerMatTag - 0.90) < 0.05) {
+    if (abs(centerMatTag - 0.98) < 0.006 || abs(centerMatTag - 0.16) < 0.02 || abs(centerMatTag - 0.25) < 0.05 || abs(centerMatTag - 0.75) < 0.05 || abs(centerMatTag - 0.90) < 0.05) {
         return 0.0;
     }
 
@@ -163,26 +163,41 @@ vec3 preparePresentation(vec2 vTexCoord, bool includePaperGrain) {
     vec3 viewNormal   = normalize(normalSample.rgb * 2.0 - 1.0);
     float matTag      = normalSample.a;
 
+    // Convert sRGB colortex0 back to Linear space before exposure & highlight shoulder roll-off
+    // so mid-tone block textures are never over-brightened or flattened by applying ACES in sRGB space!
+    vec3 linColor = pow(max(color, vec3(0.0)), vec3(2.2));
+    if (EXPOSURE != 0.0) linColor *= exp2(EXPOSURE);
+
     if (STYLE_SELECTION == 0) {
         if (rawDepth < 0.999999 && PAINTERLY_WASH_STRENGTH > 0.0) {
-            vec3 washed = samplePainterlyWash(sampleUV, texelSize, color, linearDepth);
-            color = (PAINTERLY_WASH_STRENGTH == 1.0) ? washed
-                : mix(color, washed, PAINTERLY_WASH_STRENGTH);
+            vec3 washed = pow(max(samplePainterlyWash(sampleUV, texelSize, color, linearDepth), vec3(0.0)), vec3(2.2));
+            linColor = mix(linColor, washed, PAINTERLY_WASH_STRENGTH * 0.65);
         }
+        // Vibrant linear filmic curve: deep shadow contrast + warm luminous highlights while keeping textures sharp
+        vec3 mapped = acesFilmicToneMap(linColor * 1.18);
+        color = pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / 2.2));
+        float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        color = clamp(mix(vec3(luma), color, 1.08), 0.0, 1.0);
         vec2 paperCoord = sampleUV * vec2(viewWidth, viewHeight) * 0.22;
         float fiberGrain = (PAPER_GRAIN_STRENGTH > 0.0)
-            ? (valueNoise(paperCoord) - 0.5) * 0.012 * PAPER_GRAIN_STRENGTH : 0.0;
-        if (EXPOSURE != 0.0) color *= exp2(EXPOSURE);
-        color = acesFilmicToneMap(color * 0.85);
-        color = pow(max(color, vec3(0.0)), vec3(1.10)); // Deepens ink shadows, prevents high-key wash
+            ? (valueNoise(paperCoord) - 0.5) * 0.008 * PAPER_GRAIN_STRENGTH : 0.0;
         if (includePaperGrain) color += vec3(fiberGrain);
     } else {
-        if (EXPOSURE != 0.0) color *= exp2(EXPOSURE);
-        color = acesFilmicToneMap(color * 0.92);
-        color = pow(max(color, vec3(0.0)), vec3(1.04));
-        float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        // Vibrant Xianxia chroma boost (preserves rich azure skies, jade foliage & golden light)
-        color = clamp(mix(vec3(luma), color, 1.08), 0.0, 1.0);
+        bool isWaterSurface = (abs(matTag - 0.90) < 0.05);
+        if (isWaterSurface) {
+            if (EXPOSURE != 0.0) color *= exp2(EXPOSURE);
+            color = acesFilmicToneMap(color * 0.92);
+            color = pow(max(color, vec3(0.0)), vec3(1.04));
+            float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+            color = clamp(mix(vec3(luma), color, 1.12), 0.0, 1.0);
+        } else {
+            // Apply ACES in true Linear space (linColor * 1.24) + convert to sRGB:
+            // gives photographic shadow-to-sunlight contrast & vibrant colors like Image 3 without washing out bright textures!
+            vec3 mapped = acesFilmicToneMap(linColor * 1.24);
+            color = pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / 2.2));
+            float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+            color = clamp(mix(vec3(luma), color, 1.12), 0.0, 1.0);
+        }
     }
 
     // Relative to each style's existing grade; 1.0 is an exact bypass.
@@ -194,7 +209,7 @@ vec3 preparePresentation(vec2 vTexCoord, bool includePaperGrain) {
     int activeOutlineMode = (INK_OUTLINES == 0) ? (STYLE_SELECTION == 0 ? 2 : 0) : (INK_OUTLINES == 3 ? 0 : INK_OUTLINES);
     if (activeOutlineMode > 0) {
         float unwarpedDepthLin = linearizeDepth(texture(depthtex0, vTexCoord).r);
-        float outlineMask = computeWuxiaSilhouetteOutline(vTexCoord, texelSize, unwarpedDepthLin, viewNormal, matTag, activeOutlineMode);
+        float outlineMask = computeYunMengSilhouetteOutline(vTexCoord, texelSize, unwarpedDepthLin, viewNormal, matTag, activeOutlineMode);
 
         vec3 outlineTint;
         if (STYLE_SELECTION == 0) {
@@ -219,7 +234,8 @@ vec3 applyPresentationBorder(vec3 color, vec2 vTexCoord) {
         color *= uwVig;
     } else if (STYLE_SELECTION == 0) {
         float scrollVignette = smoothstep(0.45, 1.85, radialDistSq);
-        vec3 agedSilkBorder  = vec3(0.82, 0.78, 0.70);
+        float sceneBrightness = smoothstep(0.08, 0.35, dot(color, vec3(0.2126, 0.7152, 0.0722)));
+        vec3 agedSilkBorder  = mix(vec3(0.76, 0.78, 0.82), vec3(0.82, 0.78, 0.70), sceneBrightness);
         color = mix(color, color * agedSilkBorder, scrollVignette * 0.42);
     } else {
         float filmVignette = clamp(1.0 - radialDistSq * 0.22, 0.55, 1.0);

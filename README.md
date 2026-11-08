@@ -1,37 +1,47 @@
 # YunMeng Shaders
 
-云梦光影 is a Minecraft shader pack with two visual styles. **Guofeng Ink** uses soft jade and ink colors, outlines, and paper texture. **Xianxia Mist** uses richer colors, luminous skies, celestial details, and clear water.
+Current build: **0.1.0-alpha.6**. The shaders pass compilation and linking checks on NVIDIA. This build still needs an in-game Iris check.
 
-The current release is **0.1.0-alpha.5**. This alpha refines clouds, weather fog, atmospheric and underwater light shafts, water reflections, and both illustrated suns. Compilation and controlled rendering checks have passed; broader in-game Iris compatibility and regression testing remain in progress.
+## Performance benchmarks
+
+Earlier gameplay measurements used an **AMD Ryzen 9 7940HS** with an **NVIDIA GeForce RTX 4060 Laptop GPU**.
+
+Settings were Sodium on Fabric, Fancy graphics, an **18-chunk render distance**, and a **16-chunk simulation distance**.
+
+| Preset | Average FPS |
+| --- | --- |
+| Low | 100+ |
+| Medium | 80+ |
+| High | 60+ |
+| Ultra | Around 40 |
+
+These figures are approximate and have not been remeasured for this build.
+
+YunMeng Shaders (云梦光影) is a Minecraft Java Edition shader pack with two visual styles.
+
+## Visual styles
+
+- **Guofeng Ink:** Soft jade and ink colors, painterly outlines, and paper texture.
+- **Xianxia Mist:** Richer colors, luminous skies, celestial details, and clear water.
+
+The styles are artistic interpretations, not accurate depictions of Chinese culture or mythology.
 
 ## Features
 
-- Dynamic skies, distinct volumetric cloud formations for both styles, valley mist, moon phases, and auroras
-- Illustrated suns with soft sky blending and gently animated glow, with a larger sun for Guofeng Ink
-- Atmospheric rain and snow, coordinated storm lighting, weather-aware border fog, and cloud-controlled directional illumination
+- Dynamic skies, volumetric clouds, valley mist and auroras
 - Lighting, shadows, light shafts, and wind-animated foliage
-- Water waves, depth-tinted transparency, sky/cloud and object reflections, foam, caustics, and underwater atmosphere with cloud-controlled light shafts
-- View-dependent sun lens flare and atmospheric light shafts through openings and glass windows, with separate atmospheric strength control
-- Spatial or temporal anti-aliasing, with camera and foliage motion blur and estimated entity motion in Smooth mode
-- Low, Medium, High, and Ultra quality presets with separate style and effect controls
+- Water waves, reflections, caustics, and underwater atmosphere
+- Sun lens flare, anti-aliasing, camera motion blur, and four quality presets
 
-The defaults are Medium quality, Subtle anti-aliasing, Fast motion blur at 0.50 strength, and Soft sun lens flare.
+Both themes use simple circular moons with eight phases while replacement artwork is prepared for Build 7.
 
-## Install
+## Installation
 
-Use `YunMeng_Shaders_0.1.0-alpha.5.zip` for this release. Place the ZIP in your Minecraft profile's `shaderpacks` folder and select it with Iris. GitHub's automatic source archive is for source browsing, not installation. Use the Minecraft compatibility versions listed on the download page; the alpha build number is the shader pack version.
+Install Iris, place `YunMeng_Shaders_0.1.0-alpha.6.zip` in your `shaderpacks` folder, then select it in Minecraft's shader settings. Keep the ZIP intact.
 
-## Alpha limitations
+## License and source
 
-Cloud lighting and underwater light paths use approximations. Near-water transitions, weather changes, and performance still need broader in-game testing across scenes and hardware. Minecraft and Iris version compatibility should be verified before adding download-page compatibility tags.
+Original YunMeng code and textures are licensed under **GPL-3.0-only**. The download includes the full license and third-party credits. Third-party material retains its credited terms.
 
-## Source layout
+[Source on GitHub](https://github.com/FPJRICE/YunMeng-Shaders)
 
-- `shaders/` contains GLSL programs, settings, translations, and textures.
-- `tools/generate_cloud_volume.py` regenerates the cloud density atlas using Python, NumPy, and Pillow. Development tools stay in the source repository and are excluded from installable ZIPs; the generated textures are included.
-- `CHANGELOG.txt` describes the current build.
-- `LICENSE.txt`, `COPYING`, and `THIRD_PARTY_NOTICES.txt` contain the license terms and required credits.
-
-## License and texture reuse
-
-Original YunMeng shader code and textures are licensed under **GPL-3.0-only**. You may reuse and modify them under GPLv3, including commercially, while preserving copyright, license, and attribution notices. Third-party material retains the terms and credits listed in `THIRD_PARTY_NOTICES.txt`. See `LICENSE.txt` and `COPYING` for the full terms.

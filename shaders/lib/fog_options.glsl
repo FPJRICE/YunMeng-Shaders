@@ -1,0 +1,6 @@
+#ifndef YUNMENG_FOG_OPTIONS
+#define YUNMENG_FOG_OPTIONS
+#define FOG_DENSITY 1.00              // [0.25 0.50 0.75 1.00 1.15 1.25 1.50 1.80 2.20]
+#define SEA_OF_CLOUDS_ALTITUDE 76.0   // [56.0 68.0 76.0 88.0 104.0 120.0]
+#define SEA_OF_CLOUDS_THICKNESS 22.0  // [12.0 18.0 22.0 28.0 36.0]
+#endif

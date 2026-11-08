@@ -7,14 +7,13 @@
 #define STYLE_SELECTION 1             // [0 1] 0: Guofeng Ink, 1: Xianxia Mist
 #define CLOUD_QUALITY 1               // [0 1 2 3] Low, Medium, High, Ultra
 #define CLOUD_TYPE 0                  // [0 1 2 3] 0: Auto (By Style), 1: Shanshui 3D, 2: Cumulus 3D, 3: Off
-#define NIGHT_AURORA 0                // [0 1 2 3] 0: Auto (By Style), 1: Xianxia Celestial, 2: Guofeng Jade Silk, 3: Off
-#define FOG_DENSITY 1.00              // [0.25 0.50 0.75 1.00 1.15 1.25 1.50 1.80 2.20]
+#define NIGHT_AURORA 0                // [0 1 2 3] 0: Auto (By Theme & Style), 1: Xianxia Celestial, 2: Guofeng Jade Silk, 3: Off
+#include "/lib/fog_options.glsl"
 #include "/lib/atmospheric_options.glsl"
 #define BIOME_TINT_STRENGTH 1.00      // [0.00 0.50 0.75 1.00 1.15 1.25 1.50]
-#define SEA_OF_CLOUDS_ALTITUDE 76.0   // [56.0 68.0 76.0 88.0 104.0 120.0]
-#define SEA_OF_CLOUDS_THICKNESS 22.0  // [12.0 18.0 22.0 28.0 36.0]
 #define SUN_SIZE 1.00                 // [0.50 0.75 1.00 1.25 1.50 2.00]
 #define SUN_LENS_FLARE 1              // [0 1 2] Off, Soft, Full
+#define WIND_SPEED 1.00 // [0.00 0.25 0.50 0.75 1.00 1.25 1.50 2.00 2.50 3.00]
 #define WATER_REFLECTIONS 1           // [0 1 2] Sky Only, Fast SSR, Full SSR
 
 noperspective in vec2 vTexCoord;
@@ -32,9 +31,11 @@ flat in float vNightFactor;
 
 uniform sampler2D colortex0;
 uniform sampler2D colortex1;
+uniform sampler2D colortex2;
 uniform sampler2D colortex3;
 uniform sampler2D depthtex0;
 uniform sampler2D depthtex1;
+uniform sampler2D colortex13;
 uniform sampler2D shadowtex1;
 uniform sampler2D noisetex;
 uniform sampler2D celestialTex;
@@ -42,6 +43,7 @@ uniform sampler2D guofengMoonTex;
 uniform sampler2D xianxiaMoonTex;
 #include "/lib/shadow_coverage.glsl"
 #include "/lib/water_optics.glsl"
+#include "/lib/water_waves.glsl"
 
 uniform mat4 gbufferProjectionInverse;
 uniform mat4 gbufferProjection;
@@ -69,24 +71,42 @@ uniform int moonPhase;
 uniform float inBambooJungle;
 uniform float inMountainBiome;
 uniform float inCherryGrove;
+uniform float inSnowyBiome;
+uniform float inAridBiome;
+uniform float inSwampBiome;
 uniform float eyeSkyFactor;
 #ifndef YUNMENG_CLOUD_PREPASS
 #define YUNMENG_CLOUD_LIGHT_CACHE
 #include "/lib/water_environment.glsl"
+#include "/lib/water_fall.glsl"
 #endif
 #include "/lib/cloud_field.glsl"
+#include "/lib/air_fog.glsl"
 
 
 #ifdef YUNMENG_CLOUD_PREPASS
-/* RENDERTARGETS: 8,9,10 */
-/* const int colortex8Format = RGBA16F; */
-/* const int colortex9Format = RGBA16F; */
+/* RENDERTARGETS: 8,9,10,11 */
+/*
+const int colortex8Format = RGBA16F;
+*/
+/*
+const int colortex9Format = RGBA16F;
+*/
 const vec4 colortex8ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 const vec4 colortex9ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 layout(location = 1) out vec4 outWaterEnvironment;
 layout(location = 2) out vec4 outCloudLight;
-/* const int colortex10Format = RGBA16F; */
+/*
+const int colortex10Format = RGBA16F;
+*/
 const vec4 colortex10ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
+layout(location = 3) out vec4 outFarCloudLight;
+/*
+const int colortex11Format = RGBA16F;
+*/
+// The prepass overwrites every texel, including invalid/padded regions.
+const bool colortex11Clear = false;
+const vec4 colortex11ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 #elif LIGHT_SHAFTS > 0
 /* RENDERTARGETS: 0,7 */
 layout(location = 1) out vec4 outAtmosphericShafts;
@@ -196,6 +216,11 @@ vec3 distortShadowClipPos(vec3 shadowClipPos) {
     return shadowClipPos;
 }
 
+bool isUnderwaterSurfaceCoveredByIce(vec2 uv, vec3 playerPos) {
+    return texture(colortex13, uv).a > 0.5;
+}
+
+
 float henyeyGreensteinPhase(float cosTheta, float g) {
     float g2 = g * g;
     float denom = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4);
@@ -230,9 +255,9 @@ float computeLightningDirectionalBoost(vec3 worldRayDir) {
 }
 
 float twilightAfterglow() {
-    // Warmth survives sunset briefly, then fades out before deep night.
-    return smoothstep(-0.24, -0.06, vSunWorldDir.y)
-         * (1.0 - smoothstep(0.03, 0.22, vSunWorldDir.y));
+    // Warmth survives sunset briefly, then fades out cleanly before night so the midnight horizon never turns brown.
+    return smoothstep(-0.12, -0.02, vSunWorldDir.y)
+         * (1.0 - smoothstep(0.03, 0.22, vSunWorldDir.y)) * vDaylightFactor;
 }
 
 void getLuminousCloudPalette(out vec3 cDeepFold, out vec3 cMidFold, out vec3 cWarmMid, out vec3 cSunCrest, out vec3 silverRimColor) {
@@ -240,88 +265,111 @@ void getLuminousCloudPalette(out vec3 cDeepFold, out vec3 cMidFold, out vec3 cWa
     evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
 
     if (STYLE_SELECTION == 0) {
-        // Guofeng Ink (Shanshui): QinglÃ¼ mineral jade-teal shadow folds & warm Xuan-paper ivory crests.
-        // Night palette uses luminous moonlit silver-celadon so nocturnal clouds are clearly readable.
-        vec3 dayDeep    = vec3(0.21, 0.31, 0.33);
-        vec3 sunsetDeep = vec3(0.35, 0.27, 0.36);
-        vec3 nightDeep  = vec3(0.055, 0.098, 0.150);
+        // Guofeng Ink (Shanshui): Airy celadon-jade mist undersides & warm Xuan-paper ivory crests;
+        // deep nocturnal slate-charcoal clouds at midnight.
+        vec3 dayDeep    = vec3(0.30, 0.41, 0.45);
+        vec3 sunsetDeep = vec3(0.42, 0.32, 0.38);
+        vec3 nightDeep  = vec3(0.076, 0.092, 0.124);
 
-        vec3 dayMid     = vec3(0.55, 0.65, 0.66);
-        vec3 sunsetMid  = vec3(0.68, 0.46, 0.38);
-        vec3 nightMid   = vec3(0.135, 0.220, 0.295);
+        vec3 dayMid     = vec3(0.58, 0.68, 0.70);
+        vec3 sunsetMid  = vec3(0.74, 0.52, 0.42);
+        vec3 nightMid   = vec3(0.105, 0.126, 0.168);
 
-        vec3 dayWarm    = vec3(0.79, 0.84, 0.80);
-        vec3 sunsetWarm = vec3(0.92, 0.65, 0.44);
-        vec3 nightWarm  = vec3(0.240, 0.360, 0.445);
+        vec3 dayWarm    = vec3(0.85, 0.89, 0.86);
+        vec3 sunsetWarm = vec3(0.94, 0.68, 0.46);
+        vec3 nightWarm  = vec3(0.134, 0.158, 0.206);
 
-        vec3 dayCrest    = vec3(0.95, 0.94, 0.88);
-        vec3 sunsetCrest = vec3(1.05, 0.80, 0.56);
-        vec3 nightCrest  = vec3(0.370, 0.510, 0.590);
+        vec3 dayCrest    = vec3(0.97, 0.96, 0.91);
+        vec3 sunsetCrest = vec3(1.05, 0.82, 0.58);
+        vec3 nightCrest  = vec3(0.166, 0.194, 0.248);
 
         cDeepFold = mix(nightDeep,  mix(dayDeep,  sunsetDeep,  vSunsetFactor), vDaylightFactor);
         cMidFold  = mix(nightMid,   mix(dayMid,   sunsetMid,   vSunsetFactor), vDaylightFactor);
         cWarmMid  = mix(nightWarm,  mix(dayWarm,  sunsetWarm,  vSunsetFactor), vDaylightFactor);
         cSunCrest = mix(nightCrest, mix(dayCrest, sunsetCrest, vSunsetFactor), vDaylightFactor);
 
-        vec3 rainDeep  = mix(vec3(0.042, 0.075, 0.115), vec3(0.20, 0.28, 0.32), vDaylightFactor);
-        vec3 rainMid   = mix(vec3(0.095, 0.158, 0.220), vec3(0.35, 0.44, 0.46), vDaylightFactor);
-        vec3 rainWarm  = mix(vec3(0.170, 0.260, 0.335), vec3(0.51, 0.59, 0.59), vDaylightFactor);
-        vec3 rainCrest = mix(vec3(0.260, 0.380, 0.465), vec3(0.68, 0.74, 0.72), vDaylightFactor);
+        vec3 rainDeep  = mix(vec3(0.080, 0.096, 0.130), vec3(0.22, 0.27, 0.32), vDaylightFactor);
+        vec3 rainMid   = mix(vec3(0.106, 0.126, 0.168), vec3(0.31, 0.37, 0.42), vDaylightFactor);
+        vec3 rainWarm  = mix(vec3(0.132, 0.156, 0.204), vec3(0.41, 0.48, 0.52), vDaylightFactor);
+        vec3 rainCrest = mix(vec3(0.160, 0.188, 0.242), vec3(0.52, 0.58, 0.62), vDaylightFactor);
 
-        vec3 stormDeep  = mix(vec3(0.026, 0.048, 0.080), vec3(0.11, 0.17, 0.20), vDaylightFactor);
-        vec3 stormMid   = mix(vec3(0.065, 0.112, 0.162), vec3(0.21, 0.28, 0.31), vDaylightFactor);
-        vec3 stormWarm  = mix(vec3(0.125, 0.198, 0.268), vec3(0.34, 0.42, 0.44), vDaylightFactor);
-        vec3 stormCrest = mix(vec3(0.200, 0.300, 0.385), vec3(0.49, 0.56, 0.56), vDaylightFactor);
+        vec3 stormDeep  = mix(vec3(0.072, 0.088, 0.120), vec3(0.15, 0.19, 0.24), vDaylightFactor);
+        vec3 stormMid   = mix(vec3(0.096, 0.116, 0.156), vec3(0.22, 0.27, 0.33), vDaylightFactor);
+        vec3 stormWarm  = mix(vec3(0.120, 0.144, 0.190), vec3(0.30, 0.36, 0.42), vDaylightFactor);
+        vec3 stormCrest = mix(vec3(0.148, 0.176, 0.228), vec3(0.39, 0.46, 0.52), vDaylightFactor);
 
         cDeepFold = mix(cDeepFold, mix(rainDeep,  stormDeep,  stormFactor), wetnessFactor);
         cMidFold  = mix(cMidFold,  mix(rainMid,   stormMid,   stormFactor), wetnessFactor);
         cWarmMid  = mix(cWarmMid,  mix(rainWarm,  stormWarm,  stormFactor), wetnessFactor);
         cSunCrest = mix(cSunCrest, mix(rainCrest, stormCrest, stormFactor), wetnessFactor);
-        silverRimColor = mix(vec3(0.48, 0.66, 0.72), vec3(1.10, 0.96, 0.78), vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
+        silverRimColor = mix(vec3(0.24, 0.34, 0.44), vec3(1.10, 0.96, 0.78), vDaylightFactor) * (1.0 - wetnessFactor * 0.65);
     } else {
-        // Xianxia Mist (Cumulus): Rich cool cerulean-indigo shadows, sculpted pearl midtones,
-        // selective bright sunlit/moonlit crowns, and deep thunderstorm bases.
-        vec3 dayDeep    = vec3(0.17, 0.28, 0.43);
-        vec3 sunsetDeep = vec3(0.36, 0.26, 0.48);
-        vec3 nightDeep  = vec3(0.052, 0.096, 0.195);
+        // Xianxia Mist (Cumulus): Rich cool cerulean-indigo shadows in daylight,
+        // deep nocturnal slate-indigo clouds at midnight, and cohesive storm-slate rain canopies.
+        vec3 dayDeep    = vec3(0.28, 0.38, 0.52);
+        vec3 sunsetDeep = vec3(0.40, 0.30, 0.48);
+        vec3 nightDeep  = vec3(0.076, 0.092, 0.126);
 
-        vec3 dayMid     = vec3(0.46, 0.59, 0.74);
-        vec3 sunsetMid  = vec3(0.74, 0.48, 0.50);
-        vec3 nightMid   = vec3(0.130, 0.225, 0.390);
+        vec3 dayMid     = vec3(0.56, 0.67, 0.79);
+        vec3 sunsetMid  = vec3(0.78, 0.52, 0.52);
+        vec3 nightMid   = vec3(0.106, 0.128, 0.172);
 
         vec3 dayWarm    = vec3(0.85, 0.92, 0.97);
         vec3 sunsetWarm = vec3(0.98, 0.68, 0.50);
-        vec3 nightWarm  = vec3(0.245, 0.390, 0.600);
+        vec3 nightWarm  = vec3(0.136, 0.162, 0.212);
 
         vec3 dayCrest    = vec3(1.02, 1.00, 0.98);
         vec3 sunsetCrest = vec3(1.12, 0.86, 0.62);
-        vec3 nightCrest  = vec3(0.410, 0.590, 0.840);
+        vec3 nightCrest  = vec3(0.168, 0.198, 0.256);
 
         cDeepFold = mix(nightDeep,  mix(dayDeep,  sunsetDeep,  vSunsetFactor), vDaylightFactor);
         cMidFold  = mix(nightMid,   mix(dayMid,   sunsetMid,   vSunsetFactor), vDaylightFactor);
         cWarmMid  = mix(nightWarm,  mix(dayWarm,  sunsetWarm,  vSunsetFactor), vDaylightFactor);
         cSunCrest = mix(nightCrest, mix(dayCrest, sunsetCrest, vSunsetFactor), vDaylightFactor);
 
-        vec3 rainDeep  = mix(vec3(0.038, 0.072, 0.148), vec3(0.18, 0.28, 0.42), vDaylightFactor);
-        vec3 rainMid   = mix(vec3(0.090, 0.158, 0.285), vec3(0.33, 0.45, 0.59), vDaylightFactor);
-        vec3 rainWarm  = mix(vec3(0.168, 0.275, 0.440), vec3(0.51, 0.63, 0.76), vDaylightFactor);
-        vec3 rainCrest = mix(vec3(0.275, 0.420, 0.620), vec3(0.70, 0.80, 0.90), vDaylightFactor);
+        vec3 rainDeep  = mix(vec3(0.080, 0.096, 0.132), vec3(0.20, 0.26, 0.34), vDaylightFactor);
+        vec3 rainMid   = mix(vec3(0.106, 0.128, 0.172), vec3(0.29, 0.37, 0.46), vDaylightFactor);
+        vec3 rainWarm  = mix(vec3(0.132, 0.158, 0.208), vec3(0.39, 0.48, 0.57), vDaylightFactor);
+        vec3 rainCrest = mix(vec3(0.162, 0.190, 0.246), vec3(0.50, 0.59, 0.68), vDaylightFactor);
 
-        vec3 stormDeep  = mix(vec3(0.022, 0.044, 0.098), vec3(0.08, 0.14, 0.24), vDaylightFactor);
-        vec3 stormMid   = mix(vec3(0.058, 0.108, 0.205), vec3(0.18, 0.26, 0.39), vDaylightFactor);
-        vec3 stormWarm  = mix(vec3(0.118, 0.202, 0.345), vec3(0.32, 0.43, 0.57), vDaylightFactor);
-        vec3 stormCrest = mix(vec3(0.210, 0.335, 0.520), vec3(0.50, 0.62, 0.76), vDaylightFactor);
+        vec3 stormDeep  = mix(vec3(0.072, 0.088, 0.122), vec3(0.14, 0.19, 0.26), vDaylightFactor);
+        vec3 stormMid   = mix(vec3(0.096, 0.116, 0.158), vec3(0.21, 0.27, 0.36), vDaylightFactor);
+        vec3 stormWarm  = mix(vec3(0.122, 0.146, 0.194), vec3(0.29, 0.37, 0.46), vDaylightFactor);
+        vec3 stormCrest = mix(vec3(0.150, 0.178, 0.232), vec3(0.38, 0.47, 0.56), vDaylightFactor);
 
         cDeepFold = mix(cDeepFold, mix(rainDeep,  stormDeep,  stormFactor), wetnessFactor);
         cMidFold  = mix(cMidFold,  mix(rainMid,   stormMid,   stormFactor), wetnessFactor);
         cWarmMid  = mix(cWarmMid,  mix(rainWarm,  stormWarm,  stormFactor), wetnessFactor);
         cSunCrest = mix(cSunCrest, mix(rainCrest, stormCrest, stormFactor), wetnessFactor);
-        silverRimColor = mix(vec3(0.52, 0.74, 1.00), vec3(1.14, 1.04, 0.90), vDaylightFactor) * (1.0 - wetnessFactor * 0.45);
+        silverRimColor = mix(vec3(0.26, 0.38, 0.52), vec3(1.14, 1.04, 0.90), vDaylightFactor) * (1.0 - wetnessFactor * 0.65);
     }
     float afterglow = twilightAfterglow() * (1.0 - wetnessFactor * 0.85);
     vec3 duskTint = (STYLE_SELECTION == 0) ? vec3(0.62, 0.34, 0.23) : vec3(0.72, 0.35, 0.30);
     cWarmMid = mix(cWarmMid, duskTint * 0.72, afterglow * 0.30);
     cSunCrest = mix(cSunCrest, duskTint, afterglow * 0.38);
+
+    // Cohesive Biome Cloud Tinting: shift cloud bases and midtones toward the active biome atmosphere
+    float bScale = (vDaylightFactor * vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
+    float wBamboo = clamp(inBambooJungle * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float wCherry = clamp(inCherryGrove  * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float wSnowy  = clamp(inSnowyBiome   * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float wArid   = clamp(inAridBiome    * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float wSwamp  = clamp(inSwampBiome   * BIOME_TINT_STRENGTH, 0.0, 1.0);
+
+    cDeepFold = mix(cDeepFold, vec3(0.22, 0.46, 0.42) * bScale, wBamboo * 0.38);
+    cMidFold  = mix(cMidFold,  vec3(0.48, 0.74, 0.68) * bScale, wBamboo * 0.30);
+
+    cDeepFold = mix(cDeepFold, vec3(0.46, 0.36, 0.48) * bScale, wCherry * 0.38);
+    cMidFold  = mix(cMidFold,  vec3(0.80, 0.66, 0.78) * bScale, wCherry * 0.32);
+
+    cDeepFold = mix(cDeepFold, vec3(0.32, 0.44, 0.64) * bScale, wSnowy  * 0.40);
+    cMidFold  = mix(cMidFold,  vec3(0.66, 0.76, 0.90) * bScale, wSnowy  * 0.32);
+
+    cDeepFold = mix(cDeepFold, vec3(0.48, 0.40, 0.32) * bScale, wArid   * 0.42);
+    cMidFold  = mix(cMidFold,  vec3(0.82, 0.70, 0.54) * bScale, wArid   * 0.36);
+
+    cDeepFold = mix(cDeepFold, vec3(0.28, 0.36, 0.30) * bScale, wSwamp  * 0.42);
+    cMidFold  = mix(cMidFold,  vec3(0.52, 0.60, 0.50) * bScale, wSwamp  * 0.34);
 }
 
 void applyCelestialCloudGlow(vec3 worldRayDir, float thinnessFactor, inout vec3 cloudColor) {
@@ -373,6 +421,9 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
     float bambooWeight   = clamp(inBambooJungle * BIOME_TINT_STRENGTH, 0.0, 1.0);
     float mountainWeight = clamp(max(inMountainBiome, altitudeMountainHint * 0.55) * BIOME_TINT_STRENGTH, 0.0, 1.0);
     float cherryWeight   = clamp(inCherryGrove * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float snowyWeight    = clamp(inSnowyBiome * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float aridWeight     = clamp(inAridBiome * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float swampWeight    = clamp(inSwampBiome * BIOME_TINT_STRENGTH, 0.0, 1.0);
 
     vec3 zenithCol, midCol, horizonCol;
 
@@ -385,21 +436,21 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
         vec3 sunsetMid     = vec3(0.68, 0.44, 0.34);
         vec3 sunsetHorizon = vec3(0.84, 0.54, 0.36);
 
-        vec3 nightZenith   = vec3(0.015, 0.035, 0.065);
-        vec3 nightMid      = vec3(0.038, 0.072, 0.120);
-        vec3 nightHorizon  = vec3(0.075, 0.125, 0.185);
+        vec3 nightZenith   = vec3(0.058, 0.072, 0.102);
+        vec3 nightMid      = vec3(0.086, 0.106, 0.144);
+        vec3 nightHorizon  = vec3(0.128, 0.154, 0.198);
 
         zenithCol  = mix(nightZenith,  mix(noonZenith,  sunsetZenith,  vSunsetFactor), vDaylightFactor);
         midCol     = mix(nightMid,     mix(noonMid,     sunsetMid,     vSunsetFactor), vDaylightFactor);
         horizonCol = mix(nightHorizon, mix(noonHorizon, sunsetHorizon, vSunsetFactor), vDaylightFactor);
 
-        vec3 rainZenith   = mix(vec3(0.020, 0.038, 0.064), vec3(0.22, 0.31, 0.34), vDaylightFactor);
-        vec3 rainMid      = mix(vec3(0.038, 0.068, 0.102), vec3(0.32, 0.40, 0.42), vDaylightFactor);
-        vec3 rainHorizon  = mix(vec3(0.062, 0.102, 0.142), vec3(0.30, 0.35, 0.35), vDaylightFactor);
+        vec3 rainZenith   = mix(vec3(0.082, 0.098, 0.134), vec3(0.22, 0.28, 0.33), vDaylightFactor);
+        vec3 rainMid      = mix(vec3(0.108, 0.128, 0.170), vec3(0.30, 0.37, 0.42), vDaylightFactor);
+        vec3 rainHorizon  = mix(vec3(0.142, 0.168, 0.216), vec3(0.34, 0.41, 0.45), vDaylightFactor);
 
-        vec3 stormZenith  = mix(vec3(0.015, 0.028, 0.048), vec3(0.14, 0.20, 0.23), vDaylightFactor);
-        vec3 stormMid     = mix(vec3(0.028, 0.050, 0.078), vec3(0.21, 0.28, 0.30), vDaylightFactor);
-        vec3 stormHorizon = mix(vec3(0.046, 0.078, 0.112), vec3(0.17, 0.21, 0.23), vDaylightFactor);
+        vec3 stormZenith  = mix(vec3(0.074, 0.090, 0.124), vec3(0.15, 0.20, 0.25), vDaylightFactor);
+        vec3 stormMid     = mix(vec3(0.098, 0.118, 0.160), vec3(0.22, 0.28, 0.34), vDaylightFactor);
+        vec3 stormHorizon = mix(vec3(0.132, 0.158, 0.206), vec3(0.26, 0.32, 0.38), vDaylightFactor);
 
         zenithCol  = mix(zenithCol,  mix(rainZenith,  stormZenith,  stormFactor), wetnessFactor);
         midCol     = mix(midCol,     mix(rainMid,     stormMid,     stormFactor), wetnessFactor);
@@ -413,53 +464,74 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
         vec3 sunsetMid     = vec3(0.78, 0.44, 0.48);
         vec3 sunsetHorizon = vec3(0.98, 0.64, 0.42);
 
-        vec3 nightZenith   = vec3(0.015, 0.032, 0.078);
-        vec3 nightMid      = vec3(0.040, 0.080, 0.160);
-        vec3 nightHorizon  = vec3(0.078, 0.140, 0.245);
+        vec3 nightZenith   = vec3(0.056, 0.070, 0.102);
+        vec3 nightMid      = vec3(0.084, 0.104, 0.144);
+        vec3 nightHorizon  = vec3(0.126, 0.152, 0.198);
 
         zenithCol  = mix(nightZenith,  mix(noonZenith,  sunsetZenith,  vSunsetFactor), vDaylightFactor);
         midCol     = mix(nightMid,     mix(noonMid,     sunsetMid,     vSunsetFactor), vDaylightFactor);
         horizonCol = mix(nightHorizon, mix(noonHorizon, sunsetHorizon, vSunsetFactor), vDaylightFactor);
 
-        vec3 rainZenith   = mix(vec3(0.018, 0.036, 0.080), vec3(0.18, 0.29, 0.44), vDaylightFactor);
-        vec3 rainMid      = mix(vec3(0.036, 0.068, 0.135), vec3(0.29, 0.40, 0.54), vDaylightFactor);
-        vec3 rainHorizon  = mix(vec3(0.060, 0.105, 0.188), vec3(0.30, 0.36, 0.43), vDaylightFactor);
+        vec3 rainZenith   = mix(vec3(0.080, 0.096, 0.134), vec3(0.20, 0.27, 0.35), vDaylightFactor);
+        vec3 rainMid      = mix(vec3(0.106, 0.128, 0.172), vec3(0.28, 0.37, 0.46), vDaylightFactor);
+        vec3 rainHorizon  = mix(vec3(0.140, 0.168, 0.218), vec3(0.32, 0.41, 0.50), vDaylightFactor);
 
-        vec3 stormZenith  = mix(vec3(0.012, 0.025, 0.058), vec3(0.10, 0.16, 0.27), vDaylightFactor);
-        vec3 stormMid     = mix(vec3(0.026, 0.050, 0.102), vec3(0.17, 0.25, 0.37), vDaylightFactor);
-        vec3 stormHorizon = mix(vec3(0.045, 0.080, 0.148), vec3(0.16, 0.21, 0.28), vDaylightFactor);
+        vec3 stormZenith  = mix(vec3(0.072, 0.088, 0.124), vec3(0.14, 0.19, 0.26), vDaylightFactor);
+        vec3 stormMid     = mix(vec3(0.096, 0.118, 0.160), vec3(0.21, 0.27, 0.36), vDaylightFactor);
+        vec3 stormHorizon = mix(vec3(0.130, 0.156, 0.206), vec3(0.25, 0.32, 0.40), vDaylightFactor);
 
         zenithCol  = mix(zenithCol,  mix(rainZenith,  stormZenith,  stormFactor), wetnessFactor);
         midCol     = mix(midCol,     mix(rainMid,     stormMid,     stormFactor), wetnessFactor);
         horizonCol = mix(horizonCol, mix(rainHorizon, stormHorizon, stormFactor), wetnessFactor);
     }
 
-    float nightBiomeScale = mix(0.22, 1.0, vDaylightFactor) * (1.0 - wetnessFactor * 0.55);
-    vec3 bambooJade   = ((STYLE_SELECTION == 0) ? vec3(0.54, 0.72, 0.66) : vec3(0.38, 0.72, 0.64)) * nightBiomeScale;
-    vec3 mountainGray = ((STYLE_SELECTION == 0) ? vec3(0.72, 0.77, 0.78) : vec3(0.64, 0.74, 0.84)) * nightBiomeScale;
-    vec3 cherryRose   = vec3(0.88, 0.72, 0.80) * nightBiomeScale;
+    // Daytime biome colors scale smoothly to 0 at night so warm yellow/amber/olive daytime tints
+    // NEVER turn the midnight horizon or sky into muddy brown! At night, subtle cool moonlight shifts apply instead.
+    float dayBiomeGate = (vDaylightFactor * vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
+    vec3 bambooJade   = mix(vec3(0.038, 0.072, 0.088), (STYLE_SELECTION == 0) ? vec3(0.46, 0.78, 0.68) : vec3(0.32, 0.80, 0.70), vDaylightFactor);
+    vec3 mountainGray = mix(vec3(0.048, 0.072, 0.112), (STYLE_SELECTION == 0) ? vec3(0.68, 0.78, 0.84) : vec3(0.58, 0.74, 0.90), vDaylightFactor);
+    vec3 cherryRose   = mix(vec3(0.062, 0.068, 0.112), vec3(0.95, 0.72, 0.85), vDaylightFactor);
+    vec3 snowyAlpen   = mix(vec3(0.056, 0.084, 0.132), (STYLE_SELECTION == 0) ? vec3(0.78, 0.86, 0.95) : vec3(0.82, 0.86, 0.98), vDaylightFactor);
+    vec3 aridAmber    = mix(vec3(0.048, 0.068, 0.102), (STYLE_SELECTION == 0) ? vec3(0.92, 0.74, 0.48) : vec3(0.98, 0.76, 0.50), vDaylightFactor);
+    vec3 swampCeladon = mix(vec3(0.036, 0.060, 0.078), (STYLE_SELECTION == 0) ? vec3(0.46, 0.58, 0.46) : vec3(0.44, 0.60, 0.48), vDaylightFactor);
 
-    float biomeFade = 1.0 - wetnessFactor * 0.60;
-    horizonCol = mix(horizonCol, bambooJade,   bambooWeight * 0.45 * biomeFade);
-    horizonCol = mix(horizonCol, mountainGray, mountainWeight * 0.40 * biomeFade);
-    horizonCol = mix(horizonCol, cherryRose,   cherryWeight * 0.35 * biomeFade);
+    float nightBiomeScale = mix(0.18, 1.0, vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
+    float biomeFade = mix(0.28, 1.0, dayBiomeGate) * (1.0 - wetnessFactor * 0.55);
+    horizonCol = mix(horizonCol, bambooJade,   bambooWeight   * 0.62 * biomeFade);
+    horizonCol = mix(horizonCol, mountainGray, mountainWeight * 0.48 * biomeFade);
+    horizonCol = mix(horizonCol, cherryRose,   cherryWeight   * 0.58 * biomeFade);
+    horizonCol = mix(horizonCol, snowyAlpen,   snowyWeight    * 0.62 * biomeFade);
+    horizonCol = mix(horizonCol, aridAmber,    aridWeight     * 0.65 * biomeFade);
+    horizonCol = mix(horizonCol, swampCeladon, swampWeight    * 0.60 * biomeFade);
 
+    // Distinct mid-sky and zenith biome shift so the entire atmospheric dome reflects the current biome
+    midCol = mix(midCol, bambooJade   * 0.84, bambooWeight   * 0.42 * biomeFade);
+    midCol = mix(midCol, mountainGray * 0.85, mountainWeight * 0.32 * biomeFade);
+    midCol = mix(midCol, cherryRose   * 0.86, cherryWeight   * 0.40 * biomeFade);
+    midCol = mix(midCol, snowyAlpen   * 0.84, snowyWeight    * 0.42 * biomeFade);
+    midCol = mix(midCol, aridAmber    * 0.86, aridWeight     * 0.45 * biomeFade);
+    midCol = mix(midCol, swampCeladon * 0.80, swampWeight    * 0.42 * biomeFade);
+
+    zenithCol = mix(zenithCol, vec3(0.14, 0.48, 0.62) * nightBiomeScale, bambooWeight * 0.32 * biomeFade);
+    zenithCol = mix(zenithCol, vec3(0.32, 0.42, 0.72) * nightBiomeScale, cherryWeight * 0.30 * biomeFade);
+    zenithCol = mix(zenithCol, vec3(0.18, 0.38, 0.78) * nightBiomeScale, snowyWeight  * 0.34 * biomeFade);
+    zenithCol = mix(zenithCol, vec3(0.28, 0.52, 0.68) * nightBiomeScale, aridWeight   * 0.34 * biomeFade);
+    zenithCol = mix(zenithCol, vec3(0.18, 0.36, 0.40) * nightBiomeScale, swampWeight  * 0.36 * biomeFade);
+
+    // Extend the continuous sky dome gradient smoothly down to VdotU = -0.18 so elevated cameras
+    // looking down toward distant ocean/terrain horizons never see a flat horizontal cutoff line at VdotU = 0.0!
     float upFactor = clamp(VdotU, 0.0, 1.0);
-    float midCurve = pow(1.0 - upFactor, 2.2);
-    // Above the horizon, transition smoothly to mid/zenith sky; below the horizon (where distant
-    // terrain and unloaded chunk borders sit), maintain a deep, continuous atmospheric horizon mist cushion
-    // so unloaded chunks dissolve into horizon haze rather than feeling like empty dark space.
-    float horCurve = (VdotU >= 0.0)
-        ? pow(1.0 - VdotU, 4.8)
-        : pow(1.0 - clamp(-VdotU * 1.35, 0.0, 1.0), 2.2);
+    float skyElev  = clamp((VdotU + 0.18) / 1.18, 0.0, 1.0);
+    float midCurve = pow(1.0 - skyElev, 2.2);
+    float horCurve = (VdotU >= -0.08)
+        ? pow(1.0 - clamp((VdotU + 0.08) / 0.86, 0.0, 1.0), 2.8)
+        : pow(1.0 - clamp((-VdotU - 0.08) * 1.45, 0.0, 1.0), 2.0);
 
     vec3 sky = mix(zenithCol, midCol, midCurve);
     sky = mix(sky, horizonCol, horCurve);
 
-    if (VdotU < 0.0) {
-        // Smooth sub-horizon mist cushion holds horizonCol across the chunk-border band (VdotU in [-0.28, 0.0])
-        // and tapers gently toward the nadir so neither horizon chunk borders nor above-cloud nadir views show a void.
-        float subHorizonHold = (1.0 - smoothstep(-0.48, -0.08, VdotU));
+    if (VdotU < -0.08) {
+        float subHorizonHold = (1.0 - smoothstep(-0.52, -0.08, VdotU));
         vec3 nadirMist = mix(horizonCol * 0.88 + midCol * 0.14, horizonCol * 0.92, vDaylightFactor);
         sky = mix(horizonCol, nadirMist, subHorizonHold);
     }
@@ -467,13 +539,13 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
     vec2 rayXZ = worldRayDir.xz / max(length(worldRayDir.xz), 0.001);
     vec2 sunXZ = vSunWorldDir.xz / max(length(vSunWorldDir.xz), 0.001);
     float sunsetSide = pow(max(dot(rayXZ, sunXZ), 0.0), 2.0);
-    float duskBand = exp(-abs(VdotU - 0.015) * 8.0) * sunsetSide;
+    float duskBand = exp(-pow((VdotU + 0.02) * 5.2, 2.0)) * sunsetSide;
     vec3 duskHorizon = (STYLE_SELECTION == 0) ? vec3(0.62, 0.29, 0.15) : vec3(0.72, 0.30, 0.21);
     sky = mix(sky, duskHorizon, twilightAfterglow() * duskBand * (1.0 - wetnessFactor * 0.85) * 0.48);
 
-    float rayHorizonGate = smoothstep(-0.02, 0.12, VdotU);
-    float sunElevGate    = smoothstep(-0.02, 0.12, vSunWorldDir.y) * rayHorizonGate;
-    float moonElevGate   = smoothstep(-0.02, 0.12, vMoonWorldDir.y) * rayHorizonGate;
+    float rayHorizonGate = smoothstep(-0.26, 0.04, VdotU);
+    float sunElevGate    = smoothstep(-0.24, 0.08, vSunWorldDir.y) * rayHorizonGate;
+    float moonElevGate   = smoothstep(-0.24, 0.08, vMoonWorldDir.y) * rayHorizonGate;
 
     float sunGlare  = pow(clamp(VdotS, 0.0, 1.0), (STYLE_SELECTION == 0 ? 18.0 : 14.0)) * (STYLE_SELECTION == 0 ? 0.15 : 0.18) * sunElevGate;
     float moonGlare = pow(clamp(VdotM, 0.0, 1.0), 14.0) * 0.12 * moonElevGate;
@@ -499,97 +571,96 @@ float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
     float overcastTrans = (1.0 - wetnessFactor * 0.92) * (1.0 - stormFactor * 0.90);
     if (overcastTrans <= 0.002) return 0.0;
 
-    // Presentation size only: preserve the light/shadow source direction and
-    // the user's shared size control. Ink needs a stronger visual presence.
-    const float sunStyleScale = (STYLE_SELECTION == 0) ? 1.24 : 1.06;
+    // Shared size control with per-style fitting for the detailed artwork.
+    const float sunStyleScale = 1.10;
     float sunAngularScale  = 0.082 * SUN_SIZE * sunStyleScale;
     float moonAngularScale = 0.080 * SUN_SIZE;
     float celestialDiscMask = 0.0;
 
-    float rayHorizonVis  = smoothstep(-0.006, 0.006, worldRayDir.y);
+    // Never slice the Sun or Moon in mid-air at worldRayDir.y = 0.0!
+    // Because applyTexturedCelestialBodies only runs on unoccluded sky pixels (depth0 >= 0.999999),
+    // actual terrain and water naturally occlude the rising/setting Sun and Moon just like Vanilla Minecraft.
+    float rayHorizonVis  = smoothstep(-0.36, -0.14, worldRayDir.y);
     if (rayHorizonVis <= 0.001) return 0.0;
 
-    float sunHaze = mix(0.62, 1.0, smoothstep(0.0, 0.16, vSunWorldDir.y));
-    float moonHaze = mix(0.62, 1.0, smoothstep(0.0, 0.16, vMoonWorldDir.y));
-    float sunHorizonVis = smoothstep(-sunAngularScale * 1.5, -sunAngularScale * 0.5,
-                                    vSunWorldDir.y) * rayHorizonVis * sunHaze;
-    float moonHorizonVis = smoothstep(-moonAngularScale * 1.5, -moonAngularScale * 0.5,
-                                     vMoonWorldDir.y) * rayHorizonVis * moonHaze;
-
-    const vec3 ORBIT_POLE = vec3(0.0, -0.6691306, 0.7431448);
+    float sunHaze = mix(0.78, 1.0, smoothstep(-0.08, 0.16, vSunWorldDir.y));
+    float moonHaze = mix(0.80, 1.0, smoothstep(-0.08, 0.16, vMoonWorldDir.y));
+    float sunHorizonVis = smoothstep(-0.28, -0.10, vSunWorldDir.y) * rayHorizonVis * sunHaze;
+    float moonHorizonVis = smoothstep(-0.28, -0.10, vMoonWorldDir.y) * rayHorizonVis * moonHaze;
 
     float cosSun = dot(worldRayDir, vSunWorldDir);
     float sunSupportRadius = min(0.096 * SUN_SIZE * sunStyleScale * 2.8, 0.99);
     if (cosSun > sqrt(1.0 - sunSupportRadius * sunSupportRadius) && sunHorizonVis > 0.001) {
-        vec3 poleAxis = (abs(dot(vSunWorldDir, ORBIT_POLE)) > 0.92) ? vec3(1.0, 0.0, 0.0) : ORBIT_POLE;
+        // Keep the artwork upright in the world sky; orbit/light directions
+        // remain unchanged. The fallback only handles an overhead singularity.
+        vec3 poleAxis = abs(vSunWorldDir.y) > 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
         vec3 sunRight = normalize(cross(vSunWorldDir, poleAxis));
         vec3 sunUp    = normalize(cross(sunRight, vSunWorldDir));
         vec2 sunUV    = vec2(dot(worldRayDir, sunRight), dot(worldRayDir, sunUp)) / (0.096 * SUN_SIZE * sunStyleScale);
         float rSun    = length(sunUV);
 
         // Animate only the light around the artwork. Stable atlas coordinates
-        // keep the painted disc and phoenix legible rather than rotating them.
+        // keep the painted disc and celestial bird legible rather than rotating them.
         float solarFlow = sin(sunUV.x * 3.2 + sunUV.y * 2.6 + frameTimeCounter * 0.13)
                         * sin(sunUV.y * 4.4 - sunUV.x * 1.8 - frameTimeCounter * 0.09);
         float coronaRadius = rSun + solarFlow * 0.025;
-        float outerCorona = exp(-max(coronaRadius - 0.54, 0.0) * 2.4)
-            * (1.0 - smoothstep(0.54, 2.8, rSun))
-            * ((STYLE_SELECTION == 0) ? 0.19 : 0.21)
+        float coronaDistance = max(coronaRadius - 0.99, 0.0);
+        float outerCorona = (exp(-coronaDistance * coronaDistance * 10.0) * 0.30
+            + exp(-coronaDistance * 2.0) * 0.07)
+            * (1.0 - smoothstep(1.2, 2.8, rSun))
             * (0.96 + 0.04 * solarFlow) * sunHorizonVis;
         vec3 coronaColor  = (STYLE_SELECTION == 0)
             ? mix(vec3(0.98, 0.72, 0.38), vec3(1.02, 0.48, 0.22), vSunsetFactor)
             : mix(vec3(1.02, 0.82, 0.46), vec3(1.08, 0.56, 0.26), vSunsetFactor);
         skyRadiance += coronaColor * outerCorona * overcastTrans;
 
-        if (rSun < 1.18) {
+        if (rSun < 2.0) {
             vec2 atlasUV;
-            vec2 localSunUV = clamp(sunUV * 0.45 + 0.5, 0.005, 0.995);
-            if (STYLE_SELECTION == 0) {
-                atlasUV = vec2(localSunUV.x * 0.5, localSunUV.y);
-            } else {
-                atlasUV = vec2(0.5 + localSunUV.x * 0.5, localSunUV.y);
-            }
-
-            vec4 texSun = texture(celestialTex, atlasUV);
-            float edgeFade = 1.0 - smoothstep((STYLE_SELECTION == 0) ? 0.74 : 0.84, 1.15, rSun);
-            float paintedEdge = smoothstep(0.58, 1.05, rSun);
-            edgeFade *= mix(1.0, (STYLE_SELECTION == 0) ? 0.66 : 0.88, paintedEdge);
-            float sunAlpha = texSun.a * edgeFade * overcastTrans * sunHorizonVis;
-
-            if (sunAlpha > 0.001) {
-                vec3 sunArtwork = texSun.rgb;
+            // Padded sun trial retains the original two-cell layout.
+            float sunArtworkScale = 0.41;
+            vec2 sunArtworkCenter = vec2(0.5);
+            vec2 localSunUV = vec2(sunUV.x, -sunUV.y) * sunArtworkScale + sunArtworkCenter;
+            if (all(greaterThanEqual(localSunUV, vec2(0.0))) && all(lessThanEqual(localSunUV, vec2(1.0)))) {
+                vec2 sunCellSize = vec2(textureSize(celestialTex, 0)) * vec2(0.5, 1.0);
+                localSunUV = clamp(localSunUV, 0.5 / sunCellSize, 1.0 - 0.5 / sunCellSize);
                 if (STYLE_SELECTION == 0) {
-                    vec3 sunsetTint = mix(vec3(0.98, 0.94, 0.88), vec3(1.12, 0.58, 0.36), vSunsetFactor);
-                    sunArtwork *= sunsetTint;
-
-                    float discBleed = exp(-max(rSun - 0.44, 0.0) * 3.2) * 0.20;
-                    vec3 bleedColor = mix(vec3(0.98, 0.74, 0.40), vec3(1.04, 0.50, 0.24), vSunsetFactor);
-                    // Air light softens the painted perimeter; emission follows
-                    // the artwork blend so an opaque texel cannot erase it.
-                    sunArtwork = mix(sunArtwork, sunArtwork * 0.70 + skyRadiance * 0.30,
-                                     paintedEdge * 0.55);
-                    skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
-                    skyRadiance += bleedColor * discBleed * sunAlpha * (0.96 + solarFlow * 0.04);
+                    atlasUV = vec2(localSunUV.x * 0.5, localSunUV.y);
                 } else {
-                    vec3 solarBrilliance = mix(vec3(0.98, 0.94, 0.86), vec3(1.14, 0.64, 0.38), vSunsetFactor);
-                    sunArtwork *= solarBrilliance;
-
-                    float solarBloom = exp(-max(rSun - 0.46, 0.0) * 3.3) * 0.18;
-                    vec3 bloomColor  = mix(vec3(1.00, 0.80, 0.44), vec3(1.10, 0.58, 0.26), vSunsetFactor);
-                    sunArtwork = mix(sunArtwork, sunArtwork * 0.84 + skyRadiance * 0.16,
-                                     paintedEdge * 0.40);
-                    skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
-                    skyRadiance += bloomColor * solarBloom * sunAlpha * (0.96 + solarFlow * 0.04);
+                    atlasUV = vec2(0.5 + localSunUV.x * 0.5, localSunUV.y);
                 }
 
-                celestialDiscMask = max(celestialDiscMask, clamp(sunAlpha * 1.15 * (1.0 - wetnessFactor * 0.95), 0.0, 1.0));
+                vec4 texSun = texture(celestialTex, atlasUV);
+                float sunAlpha = texSun.a * overcastTrans * sunHorizonVis;
+
+                if (sunAlpha > 0.001) {
+                    vec3 sunArtwork = texSun.rgb;
+                    if (STYLE_SELECTION == 0) {
+                        vec3 sunsetTint = mix(vec3(1.0), vec3(1.12, 0.58, 0.36), vSunsetFactor);
+                        sunArtwork *= sunsetTint;
+
+                        float discBleed = exp(-max(rSun - 0.44, 0.0) * 3.2) * 0.20;
+                        vec3 bleedColor = mix(vec3(0.98, 0.74, 0.40), vec3(1.04, 0.50, 0.24), vSunsetFactor);
+                        skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
+                        skyRadiance += bleedColor * discBleed * sunAlpha * (1.0 - texSun.a) * (0.96 + solarFlow * 0.04);
+                    } else {
+                        vec3 solarBrilliance = mix(vec3(1.0), vec3(1.14, 0.64, 0.38), vSunsetFactor);
+                        sunArtwork *= solarBrilliance;
+
+                        float solarBloom = exp(-max(rSun - 0.46, 0.0) * 3.3) * 0.18;
+                        vec3 bloomColor  = mix(vec3(1.00, 0.80, 0.44), vec3(1.10, 0.58, 0.26), vSunsetFactor);
+                        skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
+                        skyRadiance += bloomColor * solarBloom * sunAlpha * (1.0 - texSun.a) * (0.96 + solarFlow * 0.04);
+                    }
+
+                    celestialDiscMask = max(celestialDiscMask, clamp(sunAlpha * 1.15 * (1.0 - wetnessFactor * 0.95), 0.0, 1.0));
+                }
             }
         }
     }
 
     float cosMoon = dot(worldRayDir, vMoonWorldDir);
     if (cosMoon > 0.85 && moonHorizonVis > 0.001) {
-        vec3 poleAxis  = (abs(dot(vMoonWorldDir, ORBIT_POLE)) > 0.92) ? vec3(1.0, 0.0, 0.0) : ORBIT_POLE;
+        vec3 poleAxis = abs(vMoonWorldDir.y) > 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
         vec3 moonRight = normalize(cross(vMoonWorldDir, poleAxis));
         vec3 moonUp    = normalize(cross(moonRight, vMoonWorldDir));
 
@@ -598,138 +669,56 @@ float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
         float rMoon    = length(moonUV);
 
         int mPhase = moonPhase & 7;
-        float phaseIllumFrac = (mPhase == 0) ? 1.00 : ((mPhase == 4) ? 0.18 : ((mPhase == 1 || mPhase == 7) ? 0.78 : ((mPhase == 2 || mPhase == 6) ? 0.54 : 0.34)));
+        float phaseIllumFrac = (mPhase == 0) ? 1.00 : ((mPhase == 4) ? 0.015 : ((mPhase == 1 || mPhase == 7) ? 0.85 : ((mPhase == 2 || mPhase == 6) ? 0.50 : 0.15)));
         float phaseDirX      = (mPhase >= 1 && mPhase <= 3) ? -1.0 : ((mPhase >= 5 && mPhase <= 7) ? 1.0 : 0.0);
         float dirBias        = 1.0 + 0.28 * phaseDirX * clamp(moonUV.x / max(rMoon, 0.25), -1.0, 1.0);
 
-        float wideLunarAura = exp(-rMoon * 1.15) * smoothstep(4.2, 0.45, rMoon) * 0.16;
-        float limbDiffusion = exp(-max(rMoon - 0.54, 0.0) * 3.2) * smoothstep(2.0, 0.54, rMoon) * 0.20;
-        float totalHalo     = (wideLunarAura + limbDiffusion) * phaseIllumFrac * dirBias * moonHorizonVis * overcastTrans;
+        float wideLunarAura = exp(-rMoon * 1.35) * (1.0 - smoothstep(1.0, 2.8, rMoon)) * 0.10;
+        float limbDiffusion = exp(-max(rMoon - 0.98, 0.0) * 6.0) * (1.0 - smoothstep(1.0, 2.0, rMoon)) * 0.12;
+        float totalHalo = (wideLunarAura + limbDiffusion) * mix(0.18, 1.0, phaseIllumFrac)
+            * dirBias * moonHorizonVis * overcastTrans;
 
         vec3 haloTint = (STYLE_SELECTION == 0)
             ? vec3(0.56, 0.72, 0.70)
             : vec3(0.46, 0.76, 0.92);
         skyRadiance += haloTint * totalHalo;
 
-        vec2 localUV = moonUV * 0.45 + 0.5;
-        if (all(greaterThanEqual(localUV, vec2(0.0))) && all(lessThanEqual(localUV, vec2(1.0)))) {
-            ivec2 tile = ivec2(mPhase & 3, mPhase >> 2);
-            vec2 tileSize = vec2(512.0, 512.0);
-            vec2 safeUV   = clamp(localUV, 0.5 / tileSize, 1.0 - 0.5 / tileSize);
-            vec2 atlasUV  = (vec2(tile) + safeUV) / vec2(4.0, 2.0);
-
-            vec4 texMoon = (STYLE_SELECTION == 1)
-                ? texture(xianxiaMoonTex, atlasUV)
-                : texture(guofengMoonTex, atlasUV);
-
-            float edgeFade = smoothstep(1.16, 0.92, rMoon);
-            float rawAlpha = texMoon.a * edgeFade * overcastTrans * moonHorizonVis;
-
-            if (rawAlpha > 0.001) {
-                vec3 litTint = (STYLE_SELECTION == 0) ? vec3(0.96, 0.95, 0.90) : vec3(0.92, 0.97, 1.00);
-                vec3 targetMoon = max(skyRadiance + texMoon.rgb * 0.24, texMoon.rgb * litTint);
-
-                float rimFeather = 1.0 - smoothstep(0.58, 0.96, rMoon) * 0.25;
-                float effectiveAlpha = rawAlpha * rimFeather;
-
-                skyRadiance = mix(skyRadiance, targetMoon, effectiveAlpha);
-                celestialDiscMask = max(celestialDiscMask, clamp(effectiveAlpha * 1.05 * (1.0 - wetnessFactor * 0.95), 0.0, 1.0));
-            }
+        // The temporary atlas uses Minecraft's eight phases in a 4-by-2 grid.
+        vec2 localUV = moonUV * (30.0 / 64.0) + 0.5;
+        localUV.y = 1.0 - localUV.y;
+        if (all(greaterThanEqual(localUV, vec2(0.0))) && all(lessThan(localUV, vec2(1.0)))) {
+            const int cellSize = 64;
+            ivec2 cell = ivec2(mPhase & 3, mPhase >> 2);
+            ivec2 pixel = cell * cellSize + ivec2(localUV * float(cellSize));
+            vec4 moon = (STYLE_SELECTION == 0) ? texelFetch(guofengMoonTex, pixel, 0)
+                                              : texelFetch(xianxiaMoonTex, pixel, 0);
+            float opacity = moon.a * moonHorizonVis * overcastTrans;
+            skyRadiance = mix(skyRadiance, moon.rgb, opacity);
+            celestialDiscMask = max(celestialDiscMask, opacity);
         }
+
     }
 
     return celestialDiscMask;
 }
 
-vec3 renderNightWuxiaAurora(vec3 worldRayDir, float time, int auroraMode) {
-    float wetnessFactor, stormFactor, lightningFlash;
-    evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
-    if (auroraMode == 3 || vNightFactor <= 0.01 || worldRayDir.y <= 0.01) {
-        return vec3(0.0);
-    }
+#include "/lib/aurora.glsl"
 
-    int activeAuroraStyle = (auroraMode == 0) ? (STYLE_SELECTION == 1 ? 1 : 2) : auroraMode;
-    float nightVis = vNightFactor * (1.0 - wetnessFactor * 0.94) * (1.0 - stormFactor * 0.95);
-    if (nightVis <= 0.005) return vec3(0.0);
-
-    const vec3 C_UP    = vec3( 0.34188,  0.86923, -0.35742);
-    const vec3 C_RIGHT = vec3( 0.89842, -0.17852,  0.40122);
-    const vec3 C_FWD   = vec3(-0.27525,  0.46118,  0.84354);
-
-    float lat = dot(worldRayDir, C_UP);
-    float xP  = dot(worldRayDir, C_RIGHT);
-    float zP  = dot(worldRayDir, C_FWD);
-
-    vec3 drift = vec3(time * 0.008, -time * 0.005, time * 0.006);
-    float w1 = silkyFbm3D(worldRayDir * 2.4 + drift);
-    float w2 = silkyFbm3D(worldRayDir * 2.4 + vec3(5.2, 1.3, 8.7) - drift * 0.8);
-
-    vec3 warpedRay = worldRayDir * 3.6 + vec3(w1 - 0.5, w2 - 0.5, (w1 - w2) * 0.7) * 1.25;
-    float flowA = silkyFbm3D(warpedRay);
-    float flowB = silkyFbm3D(warpedRay * 2.05 + vec3(3.1, -2.4, 4.7));
-
-    float meander1 = (w1 - 0.5) * 0.26 + 0.09 * sin(xP * 2.8 - zP * 1.9 + time * 0.010);
-    float h1 = lat - meander1;
-
-    float striation1 = silkyFbm3D(vec3(worldRayDir.x * 11.0 - worldRayDir.y * 2.5 + w1 * 1.8, worldRayDir.y * 4.0, worldRayDir.z * 11.0 + w2 * 1.8));
-    float striation2 = silkyFbm3D(vec3(worldRayDir.x * 22.0 + w2 * 2.2, worldRayDir.y * 6.0, worldRayDir.z * 22.0 - w1 * 2.2));
-    float curtainFolds = smoothstep(0.24, 0.82, striation1 * 0.62 + striation2 * 0.38);
-
-    float lowerEdge1 = smoothstep(-0.025, 0.008, h1) * exp(-max(h1, 0.0) * 13.0) * (0.50 + 0.60 * flowA);
-    float curtain1   = smoothstep(-0.015, 0.025, h1) * exp(-max(h1, 0.0) * 4.5) * (0.30 + 0.90 * curtainFolds) * smoothstep(0.25, 0.78, flowA);
-
-    float meander2 = -(w2 - 0.5) * 0.28 + 0.11 * cos(xP * 2.2 + zP * 2.4 - time * 0.008) + 0.06;
-    float h2 = lat - meander2;
-    float nebulaBillows = smoothstep(0.32, 0.80, flowA * 0.52 + flowB * 0.48);
-    float lowerEdge2 = smoothstep(-0.030, 0.012, h2) * exp(-max(h2, 0.0) * 10.0) * nebulaBillows;
-    float curtain2   = exp(-(h2 * h2) / 0.038) * nebulaBillows * (0.45 + 0.55 * curtainFolds);
-
-    vec3 starGrid  = worldRayDir * 155.0;
-    vec3 starCell  = floor(starGrid);
-    vec3 starFract = fract(starGrid) - 0.5;
-    float starR2   = dot(starFract, starFract);
-    float starSeed = hash13(starCell);
-    float twinkle  = 0.65 + 0.35 * sin(time * 2.2 + starSeed * 62.8);
-    float starPinprick = exp(-starR2 * 18.0) * step(0.962, starSeed) * twinkle * clamp(curtain1 + curtain2 * 1.4, 0.0, 1.0);
-
-    vec3 colBottom, colMid, colUpper, colCrown, colStardust;
-    float styleScale;
-    if (activeAuroraStyle == 1) {
-        colBottom   = vec3(0.14, 0.94, 1.00);
-        colMid      = vec3(0.18, 0.56, 0.98);
-        colUpper    = vec3(0.62, 0.26, 0.92);
-        colCrown    = vec3(0.84, 0.32, 0.78);
-        colStardust = vec3(0.88, 0.98, 1.00);
-        styleScale  = 0.88;
-    } else {
-        colBottom   = vec3(0.28, 0.82, 0.74);
-        colMid      = vec3(0.20, 0.56, 0.64);
-        colUpper    = vec3(0.34, 0.32, 0.58);
-        colCrown    = vec3(0.48, 0.34, 0.56);
-        colStardust = vec3(0.96, 0.92, 0.82);
-        styleScale  = 0.64;
-    }
-
-    float h1Norm = clamp(max(h1, 0.0) / 0.24, 0.0, 1.0);
-    vec3 cBody1  = mix(colMid, colUpper, h1Norm);
-    vec3 rgb1    = colBottom * (lowerEdge1 * 0.80) + cBody1 * (curtain1 * 0.85);
-
-    float h2Norm = clamp((h2 + 0.15) / 0.35, 0.0, 1.0);
-    vec3 cBody2  = mix(colMid, colCrown, h2Norm);
-    vec3 rgb2    = colBottom * (lowerEdge2 * 0.45) + cBody2 * (curtain2 * 0.70);
-
-    vec3 stardustRgb = colStardust * (starPinprick * 1.30);
-
-    float horizonFade = smoothstep(0.02, 0.15, clamp(worldRayDir.y, 0.0, 1.0));
-    return (rgb1 + rgb2 + stardustRgb) * horizonFade * styleScale * nightVis;
+// Celestial artwork is behind the emissive columns. Native stars are already
+// behind the artwork. Above the layer, columns are added after the lower clouds.
+float applyCelestialsAndAurora(inout vec3 sky, vec3 ray, float time, int mode) {
+    float discMask = applyTexturedCelestialBodies(sky, ray);
+    if (cameraPosition.y < AURORA_BASE_Y)
+        sky += renderNightYunMengAurora(ray, time, mode, 1.0 - discMask);
+    return discMask;
 }
 
 /* =============================================================================
- * UNIFIED 3D VOLUMETRIC CLOUDS ON A CURVED SPHERICAL ATMOSPHERE SHELL
- * (Adapted from Guerrilla Games' Horizon Zero Dawn / Nubis principles for Minecraft):
- * 1. Spherical Atmosphere Shell (R_SHELL = 14,000m):
- *    Brings true 3D volumetric cloud formations naturally down toward the horizon
- *    without 2D painted backdrops, decorative walls, or ray-skimming distortion.
+ * UNIFIED 3D VOLUMETRIC CLOUDS AT A CONSISTENT WORLD HEIGHT
+ * Technique references are recorded in THIRD_PARTY_NOTICES.txt.
+ * 1. World-height cloud layer:
+ *    Shared flat geometry for visible clouds and integrated cloud lighting.
+ *    Existing distance haze and extinction blend distant clouds into the sky.
  * 2. Hierarchical Modeling (Large Shapes Before Fine Detail):
  *    - Macro Weather Map establishes broad cloud massifs, varied formation heights,
  *      and generous open sky channels that evolve slowly over time and weather.
@@ -741,117 +730,105 @@ vec3 renderNightWuxiaAurora(vec3 worldRayDir, float time, int auroraMode) {
  *    - Directional self-shadowing + 2-octave multiple scattering approximation +
  *      anisotropic phase + sky/horizon bounce reveals 3D volume day and night.
  * ============================================================================= */
-const float CLOUD_SPHERE_RADIUS = 16000.0;
-
-void getCloudShellBounds(int mode, out float base, out float top) {
-    cloudBounds(mode, base, top);
-}
-
-float computeSphericalShellAltitude(vec3 tracePos, vec3 camPos, out float distXZ) {
-    vec2 dXZ = tracePos.xz - camPos.xz;
-    distXZ = length(dXZ);
-    // Curved spherical atmosphere layer brings distant 3D formations naturally down toward the horizon
-    float curveDrop = (distXZ * distXZ) / (2.0 * CLOUD_SPHERE_RADIUS);
-    return tracePos.y + curveDrop;
-}
-
-bool intersectSphericalCloudShell(vec3 camPos, vec3 rayDir, float baseAlt, float topAlt, out float tStart, out float tEnd) {
-    float a = dot(rayDir.xz, rayDir.xz) / (2.0 * CLOUD_SPHERE_RADIUS);
-    float b = rayDir.y;
-
-    if (a < 1e-7) {
-        if (abs(b) < 1e-5) return false;
-        float t1 = (baseAlt - camPos.y) / b;
-        float t2 = (topAlt  - camPos.y) / b;
-        tStart = max(min(t1, t2), 0.0);
-        tEnd   = max(t1, t2);
-        return (tEnd > tStart);
+// Cloud geometry shares the world-height convention used by cloud lighting.
+// A finite slab supports views below, inside and above the layer.
+bool intersectCloudLayer(vec3 origin, vec3 direction, float baseAlt, float topAlt,
+                         float maxDistance, out float tStart, out float tEnd) {
+    tStart = 0.0;
+    tEnd = maxDistance;
+    if (abs(direction.y) < 1e-6) {
+        return origin.y > baseAlt && origin.y < topAlt;
     }
-
-    float discTop = b * b - 4.0 * a * (camPos.y - topAlt);
-    if (discTop <= 0.0) return false;
-    float sqrtTop = sqrt(discTop);
-    float tTopPos = (-b + sqrtTop) / (2.0 * a);
-    float tTopNeg = (-b - sqrtTop) / (2.0 * a);
-
-    float discBase = b * b - 4.0 * a * (camPos.y - baseAlt);
-    if (camPos.y < baseAlt) {
-        if (discBase <= 0.0) return false;
-        float sqrtBase = sqrt(discBase);
-        tStart = max((-b + sqrtBase) / (2.0 * a), 0.0);
-        tEnd   = tTopPos;
-    } else if (camPos.y <= topAlt) {
-        tStart = 0.0;
-        if (discBase > 0.0 && b < 0.0) {
-            float sqrtBase = sqrt(discBase);
-            float tHitBase = (-b - sqrtBase) / (2.0 * a);
-            tEnd = (tHitBase > 0.0) ? tHitBase : tTopPos;
-        } else {
-            tEnd = tTopPos;
-        }
-    } else {
-        if (tTopNeg <= 0.0 && tTopPos <= 0.0) return false;
-        tStart = max(tTopNeg, 0.0);
-        if (discBase > 0.0) {
-            float sqrtBase = sqrt(discBase);
-            float tBaseNeg = (-b - sqrtBase) / (2.0 * a);
-            tEnd = (tBaseNeg > tStart) ? tBaseNeg : tTopPos;
-        } else {
-            tEnd = tTopPos;
-        }
-    }
-    return (tEnd > tStart);
+    float baseHit = (baseAlt - origin.y) / direction.y;
+    float topHit = (topAlt - origin.y) / direction.y;
+    tStart = max(min(baseHit, topHit), 0.0);
+    tEnd = min(max(baseHit, topHit), maxDistance);
+    return tEnd > tStart;
 }
 
-// World-anchored, trilinearly sampled volume; shell curvature only affects altitude.
-float sampleWuxiaCloudVolume3D(vec3 tracePos, vec3 camPos, float time, int mode,
-    float baseAlt, float maxTopAlt, float rain, float storm, float stepSize,
-    out float height, out float detail) {
-    float distXZ;
-    float altitude = computeSphericalShellAltitude(tracePos, camPos, distXZ);
-    return cloudDensity(tracePos, altitude, time, mode, rain, storm, stepSize, height, detail);
+float sampleWorldCloudVolume(vec3 tracePos, float time, int mode,
+    float rain, float storm, float stepSize, out float height, out float detail) {
+    return cloudDensity(tracePos, tracePos.y, time, mode, rain, storm, stepSize, height, detail);
 }
 
-vec4 renderWuxiaVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos, float time, vec3 bgSkyColor, float celestialDiscMask, float maxSceneDist, int activeCloudMode, bool reflectionTrace) {
+vec4 renderYunMengVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos, float time, vec3 bgSkyColor, float celestialDiscMask, float maxSceneDist, int activeCloudMode, bool reflectionTrace) {
     float wetnessFactor, stormFactor, lightningFlash;
     evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
 
     float baseAlt, maxTopAlt;
-    getCloudShellBounds(activeCloudMode, baseAlt, maxTopAlt);
-    float maxTraceDist = 2800.0;
+    cloudBounds(activeCloudMode, baseAlt, maxTopAlt);
+    float maxTraceDist = max(CLOUD_RENDER_DISTANCE, 2400.0);
+
+    // Spherical Cloud Dome Horizon Curvature (works both below and above the cloud layer):
+    float belowCloudWeight = clamp((baseAlt - camPos.y) / 48.0, 0.0, 1.0);
+    float aboveCloudWeight = clamp((camPos.y - maxTopAlt) / 64.0, 0.0, 1.0);
+    float horizonFactor    = pow(clamp(1.0 - abs(rayDirWorld.y) * 1.5, 0.0, 1.0), 1.65);
+    float horizonWrap      = CLOUD_HORIZON_CURVE * horizonFactor * (belowCloudWeight - aboveCloudWeight * 0.65);
+    vec3 cloudRayDir       = normalize(vec3(rayDirWorld.x, rayDirWorld.y + horizonWrap, rayDirWorld.z));
+
+    float maxDistClamp = min(maxSceneDist, maxTraceDist);
+    float maxSpan = (ACTIVE_CLOUD_FORM == 1) ? min(760.0, maxTraceDist * 0.38) : min(880.0, maxTraceDist * 0.44);
 
     float tStart, tEnd;
-    if (!intersectSphericalCloudShell(camPos, rayDirWorld, baseAlt, maxTopAlt, tStart, tEnd)) {
+    if (!intersectCloudLayer(camPos, cloudRayDir, baseAlt, maxTopAlt, maxDistClamp, tStart, tEnd)) {
         return vec4(0.0);
     }
-
     tStart = max(tStart, 0.0);
     if (tStart >= maxSceneDist || tEnd <= tStart || tStart >= maxTraceDist) return vec4(0.0);
-    tEnd = min(tEnd, min(maxSceneDist, min(tStart + 720.0, maxTraceDist)));
+    tEnd = min(tEnd, min(maxSceneDist, min(tStart + maxSpan, maxTraceDist)));
 
-    float localOverheadTop = maxTopAlt - 20.0;
-    float grazingFade = 1.0;
-    // Shell intersection and distance extinction handle the horizon continuously;
-    // a fixed view-angle cutoff would expose a horizontal edge during flight.
+    // Never fade out horizontal or downward rays when flying near, inside, or above the cloud layer!
+    float localOverheadTop = maxTopAlt - 12.0;
+    float nearOrAboveLayer = smoothstep(baseAlt - 42.0, baseAlt - 2.0, camPos.y);
+    float belowGrazing     = smoothstep(-0.015, 0.045, cloudRayDir.y);
+    float grazingFade      = mix(belowGrazing, 1.0, nearOrAboveLayer);
 
     #if CLOUD_QUALITY == 0
-    const int STEPS = 32;
+    const int STEPS = 20;
     #elif CLOUD_QUALITY == 1
-    const int STEPS = 64;
+    const int STEPS = 32;
     #elif CLOUD_QUALITY == 2
-    const int STEPS = 96;
+    const int STEPS = 48;
     #else
-    const int STEPS = 128;
+    const int STEPS = 64;
     #endif
-    // Water reuses the density and lighting model with a smaller ray budget.
-    const int REFLECTION_STEPS = (WATER_REFLECTIONS >= 2) ? STEPS / 2 : STEPS / 4;
-    int traceSteps = reflectionTrace ? REFLECTION_STEPS : STEPS;
+    const int REFLECTION_STEPS = (WATER_REFLECTIONS >= 2) ? max(STEPS / 2, 10) : max(STEPS / 4, 8);
+    int baseSteps  = (ACTIVE_CLOUD_FORM == 2) ? min(STEPS, 24) : ((ACTIVE_CLOUD_FORM == 1) ? min(STEPS, 32) : STEPS);
+    int traceSteps = reflectionTrace ? REFLECTION_STEPS : baseSteps;
     float totalSpan = tEnd - tStart;
+
+    #if (CLOUD_SHAPE == 2) || (CLOUD_SHAPE == 0 && SKY_STYLE == 1)
+    // Exact Dual-Slab Intersection for Lower Main Voxel Layer [baseAlt, baseAlt + 4.6]
+    // and Upper Translucent Voxel Layer [baseAlt + 28.0, baseAlt + 32.2] so zero steps are wasted in the gap!
+    float tL0, tL1, tU0, tU1;
+    bool hasL = intersectCloudLayer(camPos, cloudRayDir, baseAlt, baseAlt + 4.6, maxDistClamp, tL0, tL1);
+    bool hasU = intersectCloudLayer(camPos, cloudRayDir, baseAlt + 28.0, baseAlt + 32.2, maxDistClamp, tU0, tU1);
+    if (hasL) {
+        tL0 = max(tL0, 0.0);
+        tL1 = min(tL1, min(maxDistClamp, tL0 + maxSpan));
+        hasL = (tL1 > tL0) && (tL0 < maxDistClamp);
+    }
+    if (hasU) {
+        tU0 = max(tU0, 0.0);
+        tU1 = min(tU1, min(maxDistClamp, tU0 + maxSpan));
+        hasU = (tU1 > tU0) && (tU0 < maxDistClamp);
+    }
+    if (!hasL && !hasU) return vec4(0.0);
+    bool lowerFirst = !hasU || (hasL && tL0 <= tU0);
+    float tA0 = lowerFirst ? tL0 : tU0;
+    float tA1 = lowerFirst ? tL1 : tU1;
+    bool hasA = lowerFirst ? hasL : hasU;
+    float tB0 = lowerFirst ? tU0 : tL0;
+    float tB1 = lowerFirst ? tU1 : tL1;
+    bool hasB = lowerFirst ? hasU : hasL;
+    int halfSteps = max(traceSteps / 2, 1);
+    #endif
+
     // Use stable low-amplitude spatial offset so non-TAA modes (Subtle/Smooth AA) never show 1-pixel checkerboard stipple
     float dither = 0.15 + 0.70 * hash12(gl_FragCoord.xy);
 
     float cosLight = dot(viewRayDir, vLightViewDir);
-    float directSourceVis = smoothstep(0.0, 0.10, vLightWorldDir.y);
+    float directSourceVis = smoothstep(0.06, 0.24, vLightWorldDir.y);
     float nightAmbientVis = vNightFactor * 0.86;
     float effectiveLightVis = max(directSourceVis, nightAmbientVis);
 
@@ -862,63 +839,118 @@ vec4 renderWuxiaVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos,
     vec3 cDeepFold, cMidFold, cWarmMid, cSunCrest, silverRimColor;
     getLuminousCloudPalette(cDeepFold, cMidFold, cWarmMid, cSunCrest, silverRimColor);
 
-    float absRayY = abs(rayDirWorld.y);
-    float verticalOpticalProjection = mix(max(absRayY, 0.14), 1.0, 0.35);
-    float baseOpticalScale = ((activeCloudMode == 1) ? 0.040 : 0.050) * verticalOpticalProjection;
+    float absRayY = abs(cloudRayDir.y);
+    float verticalOpticalProjection = mix(max(absRayY, 0.10), 1.0, 0.16);
+    float baseOpticalScale = ((ACTIVE_CLOUD_FORM == 2)
+        ? 0.078
+        : ((ACTIVE_CLOUD_FORM == 1) ? 0.068 : ((activeCloudMode == 1) ? 0.052 : 0.058))) * verticalOpticalProjection;
 
-    float topDownView = smoothstep(localOverheadTop - 20.0, localOverheadTop + 15.0, camPos.y)
-                      * (1.0 - smoothstep(-0.18, 0.0, rayDirWorld.y));
+    float topDownView = smoothstep(baseAlt - 6.0, baseAlt + 8.0, camPos.y)
+                      * (1.0 - smoothstep(-0.18, 0.02, rayDirWorld.y));
 
     vec3 accumColor = vec3(0.0);
     float accumTransmittance = 1.0;
 
     float cachedShadowOD = 0.0;
     bool hasShadowSample = false;
-    vec3 shadowDir = normalize(mix(vec3(0.0, 1.0, 0.0), vLightWorldDir, directSourceVis * 0.72));
+    vec3 activeCelestialDir = (vDaylightFactor > 0.25) ? vSunWorldDir : vMoonWorldDir;
+    vec3 shadowDir = normalize(mix(vec3(0.0, 1.0, 0.0), activeCelestialDir, 0.68));
+    vec2 lightHorizDir = normalize(activeCelestialDir.xz + vec2(1e-4, 0.0));
 
     for (int i = 0; i < STEPS; i++) {
         if (i >= traceSteps) break;
+        #if (CLOUD_SHAPE == 2) || (CLOUD_SHAPE == 0 && SKY_STYLE == 1)
+        bool inSecondSlab = (i >= halfSteps);
+        if (inSecondSlab && !hasB) break;
+        if (!inSecondSlab && !hasA) continue;
+        int localIdx   = inSecondSlab ? (i - halfSteps) : i;
+        int localCount = inSecondSlab ? (traceSteps - halfSteps) : (hasB ? halfSteps : traceSteps);
+        float segStart = inSecondSlab ? tB0 : tA0;
+        float segSpan  = inSecondSlab ? (tB1 - tB0) : (tA1 - tA0);
+        float f0 = float(localIdx) / float(max(localCount, 1));
+        float f1 = float(localIdx + 1) / float(max(localCount, 1));
+        float stepSize = (f1 - f0) * segSpan;
+        float tSample  = segStart + mix(f0, f1, dither) * segSpan;
+        #else
         float f0 = float(i) / float(traceSteps);
         float f1 = float(i + 1) / float(traceSteps);
-        float w0 = mix(f0, f0 * f0, 0.34);
-        float w1 = mix(f1, f1 * f1, 0.34);
+        float w0 = mix(f0, f0 * f0, 0.30);
+        float w1 = mix(f1, f1 * f1, 0.30);
         float stepSize = (w1 - w0) * totalSpan;
         float tSample  = tStart + mix(w0, w1, dither) * totalSpan;
-        vec3 tracePos  = camPos + rayDirWorld * tSample;
-
-        float distXZ = length(tracePos.xz - camPos.xz);
+        #endif
+        vec3 rawPos    = camPos + cloudRayDir * tSample;
+        float distXZ   = length(rawPos.xz - camPos.xz);
         if (distXZ > maxTraceDist) break;
 
+        // Full 3D side-wall & upper-dome reveal across viewing sky (1.0 for 3D Voxel modes; 0.36..0.80 on ground for Soft Volumetric)
+        vec2 baseEntryXZ   = camPos.xz + cloudRayDir.xz * tStart;
+        float groundPara   = 0.36 + 0.44 * pow(clamp(1.0 - absRayY, 0.0, 1.0), 1.35);
+        float parallaxKeep = (ACTIVE_CLOUD_FORM == 2)
+            ? 1.0
+            : mix(groundPara, 1.0, smoothstep(baseAlt - 28.0, baseAlt + 12.0, camPos.y));
+        vec3 tracePos = vec3(mix(baseEntryXZ.x, rawPos.x, parallaxKeep), rawPos.y, mix(baseEntryXZ.y, rawPos.z, parallaxKeep));
+
         float localHeightNorm, detailBillow;
-        float cloudDensity = sampleWuxiaCloudVolume3D(tracePos, camPos, time, activeCloudMode, baseAlt, maxTopAlt, wetnessFactor, stormFactor, stepSize, localHeightNorm, detailBillow);
+        float cloudDensity = sampleWorldCloudVolume(tracePos, time, activeCloudMode, wetnessFactor, stormFactor, stepSize, localHeightNorm, detailBillow);
 
         if (cloudDensity > 0.001) {
+            // 2-Scale 3D Volumetric Sun Shadowing: near 3D sun-step + precomputed column optical depth cache
             #if CLOUD_QUALITY == 0
-            float shadowOD = cloudDensity * (1.0 - localHeightNorm * 0.55) * 0.85;
+            cachedShadowOD = cloudDensity * (1.0 - localHeightNorm * 0.65);
             #else
-            if (cloudDensity > 0.025 && (CLOUD_QUALITY >= 3 || !hasShadowSample || (i & 1) == 0)) {
+            if (!hasShadowSample || (i & 3) == 0) {
                 float dummyH, dummyD;
-                cachedShadowOD = sampleWuxiaCloudVolume3D(tracePos + shadowDir * (activeCloudMode == 1 ? 28.0 : 36.0), camPos, time, activeCloudMode, baseAlt, maxTopAlt, wetnessFactor, stormFactor, stepSize * 1.5, dummyH, dummyD);
+                vec3 sunStep = vec3(shadowDir.x * 24.0, max(shadowDir.y, 0.30) * 16.0, shadowDir.z * 24.0);
+                float nearSun = sampleWorldCloudVolume(tracePos + sunStep, time, activeCloudMode, wetnessFactor, stormFactor, max(stepSize * 1.4, 24.0), dummyH, dummyD);
+                #ifdef YUNMENG_CLOUD_LIGHT_CACHE
+                float colOD = cachedCloudOpticalDepth(tracePos + sunStep * 1.5, vLightWorldDir, time, activeCloudMode, wetnessFactor, stormFactor) * 0.22;
+                cachedShadowOD = nearSun * 0.64 + colOD * 0.36;
+                #else
+                cachedShadowOD = nearSun;
+                #endif
                 hasShadowSample = true;
-            } else if (!hasShadowSample) {
-                cachedShadowOD = cloudDensity * (1.0 - localHeightNorm * 0.55) * 0.75;
             }
-            float shadowOD = cachedShadowOD;
             #endif
+            float sunOccl    = max(cachedShadowOD - cloudDensity * 0.18, 0.0) * 0.82;
+            float heightOccl = pow(clamp(1.0 - localHeightNorm, 0.0, 1.0), 1.35) * 0.68;
+            float shadowOD   = heightOccl + sunOccl;
 
-            float tau = shadowOD * ((activeCloudMode == 1) ? 1.30 : (1.65 + stormFactor * 0.70)) * effectiveLightVis;
-            float multiScatter = exp(-tau) * 0.58 + exp(-tau * 0.28) * 0.42;
-            float powderEffect = 1.0 - 0.34 * exp(-cloudDensity * 2.2);
-            float lightTrans   = clamp(0.26 + 0.74 * multiScatter * powderEffect, 0.0, 1.0);
+            float tau = shadowOD * ((activeCloudMode == 1) ? 1.25 : (1.35 + stormFactor * 0.55)) * effectiveLightVis;
+            float multiScatter = exp(-tau) * 0.60 + exp(-tau * 0.32) * 0.40;
+            float powder       = 1.0 - 0.35 * exp(-cloudDensity * 3.2);
+            float wispBright   = 0.12 * exp(-cloudDensity * 2.4);
+            float lightTrans   = clamp(0.16 + 0.84 * multiScatter * powder + wispBright, 0.0, 1.0);
 
-            float billowGrad     = clamp((cloudDensity - shadowOD) * 0.38 + 0.50, 0.0, 1.0);
-            float canopyTopLight = topDownView * accumTransmittance * 0.46;
-            float reliefMod      = (detailBillow - 0.48) * 0.46 + (billowGrad - 0.50) * 0.26;
-            float verticalLight  = clamp(smoothstep(0.04, 0.86, localHeightNorm + reliefMod) + canopyTopLight, 0.0, 1.0);
-            float directionalRelief = clamp((cloudDensity-shadowOD)*1.1 + 0.48, 0.0, 1.0);
-            float cloudShading = clamp((0.12 + 0.52 * verticalLight + 0.30 * directionalRelief) * lightTrans
+            vec3 colorSample;
+            #if (CLOUD_SHAPE == 2) || (CLOUD_SHAPE == 0 && SKY_STYLE == 1)
+            // Crisp 4-Face 3D Minecraft Voxel Shading (Sunlit Top, Sunlit vs Shaded Vertical Walls, Smooth Flat Underside)
+            float envMod = mix(0.80, 1.0, vDaylightFactor) * mix(1.0, 0.68, wetnessFactor) * mix(1.0, 0.74, stormFactor);
+            bool viewingFromAbove = (camPos.y > tracePos.y + 1.2) && (cloudRayDir.y < 0.0);
+            if (detailBillow > 0.50) {
+                vec2 wallNormalXZ = (detailBillow < 0.67) ? vec2(1.0, 0.0)
+                                  : ((detailBillow < 0.77) ? vec2(-1.0, 0.0)
+                                  : ((detailBillow < 0.87) ? vec2(0.0, 1.0) : vec2(0.0, -1.0)));
+                float wallSunDot = dot(wallNormalXZ, lightHorizDir);
+                vec3 litWallCol  = mix(cWarmMid, cSunCrest, 0.58);
+                vec3 shdWallCol  = mix(cDeepFold, cMidFold, 0.38);
+                colorSample      = mix(shdWallCol, litWallCol, smoothstep(-0.18, 0.22, wallSunDot));
+            } else if (localHeightNorm > 0.68 || viewingFromAbove || topDownView > 0.35) {
+                colorSample = mix(cWarmMid, cSunCrest, 0.88);
+            } else {
+                colorSample = mix(cDeepFold, cMidFold, 0.68);
+            }
+            colorSample *= envMod * mix(0.84, 1.0, lightTrans);
+            #else
+            float sunWall           = clamp((cloudDensity - cachedShadowOD) * 0.90 + 0.52, 0.0, 1.0);
+            float canopyTopLight    = topDownView * accumTransmittance * 0.46;
+            float reliefScale       = 1.0 - wetnessFactor * 0.42;
+            float reliefMod         = ((sunWall - 0.50) * 0.34 + (detailBillow - 0.50) * 0.22) * reliefScale;
+            float verticalLight     = clamp(smoothstep(0.06, 0.58, localHeightNorm + reliefMod) + canopyTopLight, 0.0, 1.0);
+            float directionalRelief = clamp(0.28 + (sunWall * 0.52 + (detailBillow - 0.50) * 0.26) * reliefScale, 0.0, 1.0);
+            float cloudShading      = clamp((0.06 + 0.60 * verticalLight + 0.34 * directionalRelief) * lightTrans
                 + canopyTopLight * 0.30, 0.0, 1.0);
-            cloudShading *= mix(1.0, 0.72, wetnessFactor) * mix(1.0, 0.78, stormFactor);
+            cloudShading *= mix(0.76, 1.0, vDaylightFactor) * mix(1.0, 0.65, wetnessFactor) * mix(1.0, 0.72, stormFactor);
 
             float t1 = clamp(cloudShading * 1.95, 0.0, 1.0);
             float t2 = clamp((cloudShading - 0.24) * 1.85, 0.0, 1.0);
@@ -927,11 +959,12 @@ vec4 renderWuxiaVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos,
             t2 = t2 * t2 * (3.0 - 2.0 * t2);
             t3 = t3 * t3 * (3.0 - 2.0 * t3);
 
-            vec3 colorSample = mix(cDeepFold, cMidFold, t1);
+            colorSample = mix(cDeepFold, cMidFold, t1);
             colorSample = mix(colorSample, cWarmMid,  t2);
             colorSample = mix(colorSample, cSunCrest, t3);
+            #endif
 
-            float baseBounce = (1.0 - smoothstep(0.0, 0.28, localHeightNorm)) * 0.32 * (1.0 - topDownView * 0.8);
+            float baseBounce = (1.0 - smoothstep(0.0, 0.22, localHeightNorm)) * 0.10 * (1.0 - topDownView * 0.8);
             colorSample = mix(colorSample, bgSkyColor * 1.03, baseBounce);
 
             float thinTrans = exp(-shadowOD * 1.45);
@@ -942,10 +975,16 @@ vec4 renderWuxiaVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos,
 
             applyCelestialCloudGlow(rayDirWorld, thinTrans, colorSample);
 
-            float aerialHaze = 1.0 - exp(-max(distXZ - 350.0, 0.0) * 0.00120);
-            colorSample = mix(colorSample, bgSkyColor, clamp(aerialHaze * 0.92, 0.0, 0.94));
+            // Seamless Horizon Mist Extinction:
+            // Blend distant clouds 96% into bgSkyColor near the horizon across day, night, and rain/storm
+            // so the cloud dome melts invisibly into the horizon mist with zero cutoff line!
+            float aerialHaze = 1.0 - exp(-max(distXZ - 200.0, 0.0) * 0.00165);
+            float highSkyAuroraProtect = smoothstep(0.16, 0.36, rayDirWorld.y) * vNightFactor * (1.0 - wetnessFactor);
+            float hazeColorBlend = mix(0.96, 0.42, highSkyAuroraProtect);
+            colorSample = mix(colorSample, bgSkyColor, clamp(aerialHaze * hazeColorBlend, 0.0, 0.96));
 
-            float distanceEnvelope = 1.0 - smoothstep(1900.0, maxTraceDist * 0.98, distXZ);
+            float distanceEnvelope = (1.0 - smoothstep(maxTraceDist * 0.55, maxTraceDist * 0.98, distXZ))
+                                   * (1.0 - aerialHaze * mix(0.45, 0.65, highSkyAuroraProtect));
             float rawStepOD        = cloudDensity * stepSize * baseOpticalScale * distanceEnvelope;
             float stepOpticalDepth = min(rawStepOD, 4.0);
             float stepAlpha  = 1.0 - exp(-stepOpticalDepth);
@@ -966,7 +1005,7 @@ vec4 renderWuxiaVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos,
 
     vec3 finalCloudColor = accumColor / max(totalAlpha, 1e-4);
 
-    float startDistFade   = 1.0 - smoothstep(1950.0, maxTraceDist * 0.96, tStart);
+    float startDistFade   = 1.0 - smoothstep(maxTraceDist * 0.60, maxTraceDist * 0.96, tStart);
     float maxCloudOpacity = mix(0.98, 1.0, wetnessFactor);
     float shapeGamma      = 1.0;
     float finalCloudAlpha = clamp(pow(totalAlpha, shapeGamma) * maxCloudOpacity * grazingFade * startDistFade, 0.0, 1.0);
@@ -975,40 +1014,26 @@ vec4 renderWuxiaVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPos,
 }
 
 float terrainSkyBlend(vec3 playerPos) {
-    float distance = max(length(playerPos.xz), length(playerPos) * 0.86);
-    float clearEnd = min(max(far * 0.97, 64.0), far);
-    float clearStart = min(max(far * 0.62, 40.0), clearEnd * 0.90);
     float rain, storm, flash;
     evaluateWeatherState(rain, storm, flash);
-    // Rain haze must finish before terrain disappears. Iris can expose a
-    // shorter weather/biome visibility distance than the chunk render range.
-    // Use the same fade in the cloud prepass and final terrain/sky composite.
-    float weatherEnd = clearEnd * mix(0.84, 0.72, storm);
-    float end = mix(clearEnd, weatherEnd, rain);
-    if (fogEnd > 1.0) end = min(end, fogEnd * 0.97);
-    float start = min(mix(clearStart, end * 0.58, rain), end * 0.90);
-    return smoothstep(start, end, distance);
+    return airBorderFog(playerPos, rain, storm);
 }
 
-vec4 computeValleyMistAndBorderFog(vec3 worldPos, vec3 playerPos, float viewDist, vec3 skyAtRay) {
+vec4 computeValleyMistAndBorderFog(vec3 worldPos, vec3 playerPos, float viewDist, vec3 skyAtRay, vec3 worldRayDir, vec3 viewRayDir) {
     float wetnessFactor, stormFactor, lightningFlash;
     evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
-    float borderFog = terrainSkyBlend(playerPos);
-    float densityMult = FOG_DENSITY * (1.0 + wetnessFactor * 0.55 + stormFactor * 0.40);
-    float fogStartDist = mix(30.0, 10.0, wetnessFactor);
-    float delayedDist = max(viewDist - fogStartDist, 0.0);
-    float distFog = 1.0 - exp(-delayedDist * mix(0.00065, 0.0028, wetnessFactor) * densityMult);
+    float borderWeight = airBorderFog(playerPos, wetnessFactor, stormFactor);
+    float pathWeight   = airPathFog(cameraPosition, worldPos, viewDist, wetnessFactor, stormFactor);
+    float combinedFog  = 1.0 - (1.0 - borderWeight) * (1.0 - pathWeight);
 
-    float valleyDelta = (worldPos.y - SEA_OF_CLOUDS_ALTITUDE) / max(SEA_OF_CLOUDS_THICKNESS * (1.0 + wetnessFactor * 0.25), 1.0);
-    float valleyBand = exp(-valleyDelta * valleyDelta * 1.85);
-    vec2 mistDriftUV = worldPos.xz * 0.00018 + vec2(frameTimeCounter * 0.0005, -frameTimeCounter * 0.0003);
-    float billowingNoise = sampleNoiseTexTiled(mistDriftUV).g;
-    float valleyMist = valleyBand * smoothstep(0.38, 0.82, billowingNoise)
-                     * smoothstep(32.0, 128.0, viewDist);
-    float seaStrength = (STYLE_SELECTION == 1 || CLOUD_TYPE == 2) ? 0.30 : 0.22;
-    float mistFog = clamp(valleyMist * seaStrength * densityMult, 0.0, 0.65);
-    float combinedFog = 1.0 - (1.0 - borderFog) * (1.0 - distFog) * (1.0 - mistFog);
-    return vec4(skyAtRay, clamp(combinedFog, 0.0, 1.0));
+    // Anchor valley/path mist to the lower atmospheric horizon band so elevated hilltops and cherry trees
+    // fade into cohesive valley mist rather than looking see-through against the upper sky dome,
+    // while smoothly matching skyAtRay right at the unloaded chunk border.
+    vec3 mistWorldRay = normalize(vec3(worldRayDir.x, clamp(worldRayDir.y * 0.18, 0.01, 0.06), worldRayDir.z));
+    vec3 mistViewRay  = normalize(transpose(mat3(gbufferModelViewInverse)) * mistWorldRay);
+    vec3 horizonMistColor = evaluateUnifiedSky(mistWorldRay, mistViewRay);
+    vec3 fogColor = mix(horizonMistColor, skyAtRay, smoothstep(0.15, 0.85, borderWeight));
+    return vec4(fogColor, clamp(combinedFog, 0.0, 1.0));
 }
 
 vec3 applyAtmosphericPrecipitation(vec3 sceneRadiance, vec3 unifiedSky, vec3 worldRayDir) {
@@ -1045,13 +1070,14 @@ vec3 applyAtmosphericPrecipitation(vec3 sceneRadiance, vec3 unifiedSky, vec3 wor
     return mix(sceneRadiance, max(sceneRadiance * 0.85, precipColor), effectiveAlpha);
 }
 
+#ifndef YUNMENG_CLOUD_PREPASS
 vec3 computeUnderwaterLightShafts(vec3 viewPos, vec3 lightDirWorld, float cosTheta) {
     #if LIGHT_SHAFTS == 0
     return vec3(0.0);
     #else
     const int UW_STEPS = (LIGHT_SHAFTS >= 2) ? 14 : 8;
-    float sourceVisibility = smoothstep(0.0, 0.10, lightDirWorld.y);
-    if (sourceVisibility <= 0.0) return vec3(0.0);
+    float sourceVisibility = smoothstep(0.05, 0.22, lightDirWorld.y);
+    if (sourceVisibility <= 0.0 || ATMOSPHERIC_SHAFT_STRENGTH <= 0.0) return vec3(0.0);
     const int cloudMode = (CLOUD_TYPE == 0) ? (STYLE_SELECTION == 0 ? 1 : 2) : CLOUD_TYPE;
     float wetnessFactor, stormFactor, lightningFlash;
     evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
@@ -1079,22 +1105,23 @@ vec3 computeUnderwaterLightShafts(vec3 viewPos, vec3 lightDirWorld, float cosThe
             float sDepth = texture(shadowtex1, shadowUV.xy).r;
             shadowVis = step(shadowUV.z - 0.0008, sDepth);
         }
+        if (shadowVis > 0.0) {
+            // Offset slightly by depth along the ray so looking straight into the refracted sun vector
+            // integrates across wave phases instead of locking onto a single dark wave trough at the beam center.
+            vec2 wavePlaneUV = sampleWorldPos.xz - refractSunWorld.xz * (sampleWorldPos.y / refractSunWorld.y)
+                             + vec2(sampleWorldPos.y * 0.14, -sampleWorldPos.y * 0.11);
+            float t = frameTimeCounter;
 
-        vec2 wavePlaneUV = sampleWorldPos.xz - refractSunWorld.xz * (sampleWorldPos.y / refractSunWorld.y);
-        float t = frameTimeCounter;
+            float wA = sin(wavePlaneUV.x * 1.15 + wavePlaneUV.y * 0.75 - t * 1.6);
+            float wB = cos(wavePlaneUV.x * 0.85 - wavePlaneUV.y * 1.35 + t * 1.3);
+            float wC = sin((wavePlaneUV.x + wavePlaneUV.y) * 1.95 - t * 2.1);
+            float causticLens = pow(clamp(1.0 - abs(wA * 0.5 + wB * 0.5 + wC * 0.25), 0.0, 1.0), 2.4);
 
-        float wA = sin(wavePlaneUV.x * 1.15 + wavePlaneUV.y * 0.75 - t * 1.6);
-        float wB = cos(wavePlaneUV.x * 0.85 - wavePlaneUV.y * 1.35 + t * 1.3);
-        float wC = sin((wavePlaneUV.x + wavePlaneUV.y) * 1.95 - t * 2.1);
-        float causticLens = pow(clamp(1.0 - abs(wA * 0.5 + wB * 0.5 + wC * 0.25), 0.0, 1.0), 2.6);
-
-        float distAtten = exp(-length(currentViewPos) * 0.045);
-        // Follow the incident sun/moon illumination, including real storm
-        // openings. Diffuse overcast remains in underwater fog/ambient light;
-        // it must not generate directional shafts under an opaque ceiling.
-        float cloudTransmission = cloudLightTransmission(sampleWorldPos, lightDirWorld,
-            frameTimeCounter, cloudMode, wetnessFactor, stormFactor);
-        accumBeams += shadowVis * cloudTransmission * causticLens * distAtten;
+            float distAtten = exp(-length(currentViewPos) * 0.045);
+            float cloudTransmission = cloudLightTransmission(sampleWorldPos, lightDirWorld,
+                frameTimeCounter, cloudMode, wetnessFactor, stormFactor);
+            accumBeams += shadowVis * cloudTransmission * causticLens * distAtten;
+        }
         currentViewPos += stepVecView;
     }
 
@@ -1104,7 +1131,8 @@ vec3 computeUnderwaterLightShafts(vec3 viewPos, vec3 lightDirWorld, float cosThe
     float upLookBoost = smoothstep(-0.45, 0.85, worldRayDir.y) * 0.65 + 0.35;
     float sunAlign    = henyeyGreensteinPhase(dot(worldRayDir, refractSunWorld), 0.55);
 
-    float beamStrength = accumBeams * (0.75 + sunAlign * 0.55) * upLookBoost * mix(0.25, 1.0, vDaylightFactor) * float(LIGHT_SHAFTS);
+    float beamStrength = accumBeams * (0.75 + sunAlign * 0.55) * upLookBoost
+                       * mix(0.25, 1.0, vDaylightFactor) * float(LIGHT_SHAFTS) * ATMOSPHERIC_SHAFT_STRENGTH;
     beamStrength *= sourceVisibility;
 
     if (STYLE_SELECTION == 0) {
@@ -1122,44 +1150,63 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta, fl
     const int cloudMode = (CLOUD_TYPE == 0) ? (STYLE_SELECTION == 0 ? 1 : 2) : CLOUD_TYPE;
     const float MAX_SHAFT_RANGE = cloudMode == 3
         ? ((LIGHT_SHAFTS >= 2) ? 176.0 : 128.0)
-        : ((LIGHT_SHAFTS >= 2) ? 512.0 : 384.0);
+        : ((LIGHT_SHAFTS >= 2) ? 760.0 : 580.0);
     float fullViewDist = length(viewPos);
-    float maxRayDist   = depth0 >= 0.999999 && cloudMode != 3 ? MAX_SHAFT_RANGE : min(fullViewDist, MAX_SHAFT_RANGE);
-    float sourceVisibility = smoothstep(0.0, 0.10, vLightWorldDir.y);
-    if (maxRayDist <= 0.001 || sourceVisibility <= 0.0 || ATMOSPHERIC_SHAFT_STRENGTH <= 0.0) return vec3(0.0);
+    float sourceVisibility = smoothstep(0.06, 0.24, vLightWorldDir.y);
+    if (fullViewDist <= 0.001 || sourceVisibility <= 0.0 || ATMOSPHERIC_SHAFT_STRENGTH <= 0.0) return vec3(0.0);
     // Held items are foreground geometry, outside the atmospheric volume.
     if (abs(texture(colortex1, vTexCoord).a - 0.12) < 0.007) return vec3(0.0);
 
-    // Streamlined step counts (24 Soft / 40 Full) paired with composite2's 3x3 bilateral filter
-    const int RAY_STEPS = (LIGHT_SHAFTS >= 2) ? 40 : 24;
+    float wetnessFactor, stormFactor, lightningFlash;
+    evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
+    float cloudBase, cloudTop;
+    cloudBounds(cloudMode, cloudBase, cloudTop);
+
+    vec3 rayDirView = viewPos / max(fullViewDist, 1e-5);
+    vec3 rayDirPlayer = normalize(mat3(gbufferModelViewInverse) * rayDirView);
+    vec3 rayOriginPlayer = gbufferModelViewInverse[3].xyz;
+    vec3 camWorld = cameraPosition + rayOriginPlayer;
+
+    // Match the exact spherical horizon curvature used by renderYunMengVolumetricClouds
+    // so the top of every light shaft at Y = cloudBase aligns pixel-for-pixel with the visible cloud hole!
+    float belowCloudWeight = clamp((cloudBase - camWorld.y) / 48.0, 0.0, 1.0);
+    float aboveCloudWeight = clamp((camWorld.y - cloudTop) / 64.0, 0.0, 1.0);
+    float horizonFactor    = pow(clamp(1.0 - abs(rayDirPlayer.y) * 1.5, 0.0, 1.0), 1.65);
+    float horizonWrap      = CLOUD_HORIZON_CURVE * horizonFactor * (belowCloudWeight - aboveCloudWeight * 0.65);
+    vec3 curvedCloudRay    = normalize(vec3(rayDirPlayer.x, rayDirPlayer.y + horizonWrap, rayDirPlayer.z));
+
+    // Bound sky raymarching at the cloud base so 100% of samples resolve the sub-cloud crepuscular beams!
+    float maxRayDist = (depth0 >= 0.999999 && cloudMode != 3) ? MAX_SHAFT_RANGE : min(fullViewDist, MAX_SHAFT_RANGE);
+    if (cloudMode != 3 && camWorld.y < cloudBase && curvedCloudRay.y > 0.015) {
+        float tToCloudBase = (cloudBase - camWorld.y) / curvedCloudRay.y;
+        maxRayDist = min(maxRayDist, tToCloudBase + 4.0);
+    }
+    if (maxRayDist <= 0.001) return vec3(0.0);
+
+    const int RAY_STEPS = ATMOSPHERIC_SHAFT_QUALITY==0 ? 12
+        : (ATMOSPHERIC_SHAFT_QUALITY==1 ? 18 : (ATMOSPHERIC_SHAFT_QUALITY==2 ? 24 : 32));
     float dither = hash12(gl_FragCoord.xy);
 
-    float minRayDist = min(1.25, maxRayDist * 0.28);
-    vec3 rayDirView = viewPos / max(fullViewDist, 1e-5);
-    vec3 rayDirPlayer = mat3(gbufferModelViewInverse) * rayDirView;
-    vec3 rayOriginPlayer = gbufferModelViewInverse[3].xyz;
+    float minRayDist = min(1.25, maxRayDist * 0.15);
     vec3 shadowOrigin = (shadowProjection * (shadowModelView * vec4(rayOriginPlayer, 1.0))).xyz;
     vec3 shadowDirection = (shadowProjection * (shadowModelView * vec4(rayDirPlayer, 0.0))).xyz;
     vec3 lightStepShadowClip = (shadowProjection * (shadowModelView * vec4(vLightWorldDir, 0.0))).xyz;
     float oneMeterShadowZ = max(abs(lightStepShadowClip.z) * 0.1, 1e-5);
 
-    float wetnessFactor, stormFactor, lightningFlash;
-    evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
     float cloudScatter = 0.0;
     float litScatter = 0.0;
     for (int i = 0; i < RAY_STEPS; i++) {
         float u0 = float(i) / float(RAY_STEPS);
         float u1 = float(i + 1) / float(RAY_STEPS);
-        float f0 = cloudMode == 3 ? u0 * (0.36 + 0.64 * u0) : u0 * u0;
-        float f1 = cloudMode == 3 ? u1 * (0.36 + 0.64 * u1) : u1 * u1;
+        // Stratified linear + quadratic distribution resolves both near-camera window shafts
+        // and distant (100..750m) cloud-hole crepuscular beams with high sharpness!
+        float f0 = mix(u0, u0 * u0, 0.45);
+        float f1 = mix(u1, u1 * u1, 0.45);
         float cellStart = mix(minRayDist, maxRayDist, f0);
         float cellEnd   = mix(minRayDist, maxRayDist, f1);
         float stepLen   = cellEnd - cellStart;
         float sampleDistance = mix(cellStart, cellEnd, dither);
 
-        vec3 sampleWorld=cameraPosition+rayOriginPlayer+rayDirPlayer*sampleDistance;
-        float cloudTransmission=cloudLightTransmission(sampleWorld,vLightWorldDir,
-            frameTimeCounter,cloudMode,wetnessFactor,stormFactor);
         vec3 shadowClipPos = distortShadowClipPos(shadowOrigin + shadowDirection * sampleDistance);
         vec3 shadowUV = shadowClipPos * 0.5 + 0.5;
 
@@ -1177,74 +1224,75 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta, fl
             }
             isUnoccluded = mix(1.0, isUnoccluded, shadowCoverageWeight(shadowUV));
         }
-        // Beyond the terrain shadow map, cloud transmission still defines air lighting.
-        // Omitting those samples would draw the shadow-map boundary across the sky.
-        float worldY = rayOriginPlayer.y + rayDirPlayer.y * sampleDistance + cameraPosition.y;
+        if (isUnoccluded <= 0.0) continue;
+
+        vec3 sampleWorld = camWorld + rayDirPlayer * sampleDistance;
+        vec3 sampleCloudWorld = camWorld + curvedCloudRay * sampleDistance;
+        float holeTransmission = cachedCloudShaftTransmittance(sampleCloudWorld, vLightWorldDir,
+            frameTimeCounter, cloudMode, wetnessFactor, stormFactor);
+
+        float worldY = sampleWorld.y;
         float mistDensity = exp(-max(worldY - SEA_OF_CLOUDS_ALTITUDE, 0.0) * 0.012);
-        float radialWeight = exp(-sampleDistance / 14.0) * (stepLen / 4.5);
+        float radialWeight = exp(-sampleDistance / 16.0) * (stepLen / 4.5);
         if (cloudMode == 3) radialWeight += exp(-sampleDistance / 70.0) * (stepLen / 360.0);
         float densityWeight = (0.78 + 0.22 * mistDensity) * radialWeight;
-        float visibility = isUnoccluded * cloudTransmission;
+        float visibility = isUnoccluded * holeTransmission;
         litScatter += visibility * densityWeight;
-        // Cloud columns accumulate through world-space lit air, including when
-        // the viewer is inside the column. Do not subtract the camera's light.
-        float cloudBase, cloudTop;
-        cloudBounds(cloudMode, cloudBase, cloudTop);
-        float airLayer = 1.0 - smoothstep(cloudBase - 16.0, cloudBase + 8.0, worldY);
-        float airDensity = exp(-max(worldY - 64.0, 0.0) / 180.0) * airLayer;
-        cloudScatter += visibility * airDensity * exp(-sampleDistance / 600.0) * (stepLen / 160.0);
+
+        // Crepuscular cloud-hole beams: integrate along curvedCloudRay below cloudBase
+        // so beam width strictly matches the cloud hole size and moves with cloudWind!
+        float cloudY = sampleCloudWorld.y;
+        float airLayer = 1.0 - smoothstep(cloudBase - 6.0, cloudBase + 3.0, cloudY);
+        float valleyBoost = 1.0 + 0.45 * exp(-max(cloudY - SEA_OF_CLOUDS_ALTITUDE, 0.0) * 0.018);
+        float airDensity = exp(-max(cloudY - 64.0, 0.0) / 210.0) * airLayer * valleyBoost;
+        cloudScatter += visibility * airDensity * exp(-sampleDistance / 520.0) * (stepLen / 115.0);
     }
 
-    // Leave headroom between partly lit air and an open canopy gap. Early
-    // saturation turns their different optical paths into the same soft veil.
     float beamResponse = 1.0 - exp(-0.65 * litScatter * min(FOG_DENSITY, 1.35));
 
-    // Concentrate the extra visibility toward the light instead of increasing
-    // fog or exposure in every direction. Retain a softer response for Ink.
-    const float forwardLimit = (STYLE_SELECTION == 0) ? 2.9 : 3.4;
-    float forwardMie = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.55) * 12.5663706, forwardLimit);
-    float phase = 0.40 + 0.60 * forwardMie;
+    // Focused forward Mie phase so crepuscular beams appear selectively around the sun/moon region
+    // through major cloud breaks rather than flooding the entire sky hemisphere!
+    const float forwardLimit = (STYLE_SELECTION == 0) ? 2.5 : 2.8;
+    float forwardMie = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.54) * 11.0, forwardLimit);
+    float phase      = 0.24 + 0.76 * forwardMie;
 
-    float enclosureGain = mix(1.24, 0.82, smoothstep(0.50, 0.95, eyeSkyFactor));
+    float enclosureGain = mix(1.20, 0.80, smoothstep(0.50, 0.95, eyeSkyFactor));
 
-    // Continuous fog/sky damping: near geometry (windows, caves, tree canopies where horizonFogWeight ~ 0)
-    // receives full 1.0 shaft weight, while fogged chunk-border terrain and sky pixels share the exact same
-    // damped weight (0.55) so there is zero brightness jump across the chunk border or horizon!
-    float skyDamp = mix(1.0, 0.55, clamp(horizonFogWeight, 0.0, 1.0));
-    float surfaceContrast = (1.0 - smoothstep(0.26, 0.72, sceneLuma) * 0.55) * skyDamp;
+    float skyDamp = mix(1.0, 0.56, clamp(horizonFogWeight, 0.0, 1.0));
+    float surfaceContrast = (1.0 - smoothstep(0.28, 0.76, sceneLuma) * 0.52) * skyDamp;
 
     float modeScale = (LIGHT_SHAFTS >= 2) ? 1.00 : 0.75;
     float timeScale = mix(0.88, 1.00, vDaylightFactor);
-    // Continuous optical onset: a fixed empty radius draws a clear disk
-    // over water when the camera approaches the surface.
-    float nearSurfaceFade = 1.0-exp(-maxRayDist/0.45);
-    // Exposed air is much clearer than an enclosed or humid volume. Keep this
-    // gain independent of occlusion: adding a shadow must never brighten a ray.
-    float exposedGain = mix(0.72, 0.90, wetnessFactor);
+    float nearSurfaceFade = 1.0 - exp(-maxRayDist / 0.45);
+    float exposedGain = mix(0.72, 0.88, wetnessFactor);
     float structureGain = mix(1.0, exposedGain, smoothstep(0.35, 0.95, eyeSkyFactor));
-    // Keep nearby window/foliage shafts; distant views use the extended cloud
-    // volume rather than a saturated patch of scattering around the camera.
     float distantOpenAir = smoothstep(12.0, 64.0, fullViewDist)
                          * smoothstep(0.35, 0.95, eyeSkyFactor);
-    float localGain = cloudMode == 3 ? 1.0 : mix(1.0, 0.22, distantOpenAir);
+    float localGain = cloudMode == 3 ? 1.0 : mix(1.0, 0.18, distantOpenAir);
 
     float shaftIntensity = beamResponse * phase * enclosureGain * surfaceContrast *
-                           ((STYLE_SELECTION == 0) ? 0.34 : 0.37) * modeScale * ATMOSPHERIC_SHAFT_STRENGTH * structureGain *
+                           ((STYLE_SELECTION == 0) ? 0.28 : 0.30) * modeScale * ATMOSPHERIC_SHAFT_STRENGTH * structureGain *
                            timeScale * nearSurfaceFade * sourceVisibility * localGain;
 
-    vec3 dayShaftColor = (STYLE_SELECTION == 0)
+    vec3 clearDayColor = (STYLE_SELECTION == 0)
         ? mix(vec3(1.02, 0.84, 0.56), vec3(1.08, 0.64, 0.38), vSunsetFactor) * 0.88
         : mix(mix(vec3(1.05, 0.88, 0.60), vec3(0.60, 0.94, 0.80), inBambooJungle * 0.45),
-              vec3(1.12, 0.68, 0.40), vSunsetFactor) * 0.95;
+              vec3(1.12, 0.68, 0.40), vSunsetFactor) * 0.92;
+    vec3 stormDayColor = (STYLE_SELECTION == 0)
+        ? vec3(0.64, 0.82, 0.90) * 0.92
+        : vec3(0.52, 0.82, 1.04) * 0.96;
+    vec3 dayShaftColor = mix(clearDayColor, stormDayColor, wetnessFactor * 0.75);
+
     vec3 nightShaftColor = (STYLE_SELECTION == 0)
         ? vec3(0.52, 0.72, 0.76) * 0.86
-        : vec3(0.48, 0.76, 1.02) * 0.92;
+        : vec3(0.48, 0.76, 1.02) * 0.90;
 
-    float cloudBeam = cloudMode == 3 ? 0.0 : (1.0 - exp(-cloudScatter * 0.9)) * phase
-                    * ((STYLE_SELECTION == 0) ? mix(0.14, 0.23, wetnessFactor) : mix(0.18, 0.26, wetnessFactor)) * modeScale * surfaceContrast
+    float wetBeamBoost = mix(0.18, 0.28, wetnessFactor) * mix(1.0, 1.10, stormFactor);
+    float cloudBeam = cloudMode == 3 ? 0.0 : (1.0 - exp(-cloudScatter * 0.88)) * phase
+                    * wetBeamBoost * modeScale * surfaceContrast
                     * timeScale * sourceVisibility * ATMOSPHERIC_SHAFT_STRENGTH;
     vec3 shaftColor = mix(nightShaftColor, dayShaftColor, vDaylightFactor);
-    return shaftColor * clamp(shaftIntensity + cloudBeam, 0.0, 0.36);
+    return shaftColor * clamp(shaftIntensity + cloudBeam, 0.0, 0.28);
     #endif
 }
 
@@ -1325,14 +1373,20 @@ vec3 renderSunLensFlare(vec2 uv) {
 }
 #endif
 
+#endif
+
 #ifdef YUNMENG_CLOUD_PREPASS
+
+
 void main() {
     outColor0 = vec4(0.0);
     outWaterEnvironment = vec4(0.0);
     outCloudLight = vec4(0.0);
+    outFarCloudLight = vec4(0.0);
     int mode = (CLOUD_TYPE == 0) ? (STYLE_SELECTION == 0 ? 1 : 2) : CLOUD_TYPE;
     // Only the active world-map rectangle needs an extinction integration.
-    ivec2 mapSize=min(ivec2(vec2(viewWidth,viewHeight)*0.5),ivec2(cloudLightCacheResolution()));
+    ivec2 halfSize=max(ivec2(vec2(viewWidth,viewHeight)*0.5),ivec2(1));
+    ivec2 mapSize=min(halfSize,ivec2(cloudLightCacheResolution()));
     if (mode!=3 && vLightWorldDir.y>0.01 && all(lessThan(ivec2(gl_FragCoord.xy),mapSize))) {
         vec2 mapOrigin=cloudLightCacheOrigin(vec2(mapSize),cameraPosition,vLightWorldDir);
         vec2 xz=mapOrigin+gl_FragCoord.xy/vec2(mapSize)*2048.0;
@@ -1341,62 +1395,149 @@ void main() {
         outCloudLight=vec4(cloudColumnOpticalDepth(vec3(xz.x,64.0,xz.y),vLightWorldDir,
             frameTimeCounter,mode,rain,storm),1.0);
     }
+    ivec2 atlasSize=halfSize;
+    ivec2 tileSize=min(mapSize,ivec2(atlasSize.x/2,atlasSize.y));
+    if (mode!=3 && vLightWorldDir.y>0.01
+        && cloudFarCacheWeight(vLightWorldDir)>0.0
+        && tileSize.x>0 && tileSize.y>0
+        && gl_FragCoord.x<float(tileSize.x*2) && gl_FragCoord.y<float(tileSize.y)) {
+        float side=gl_FragCoord.x<float(tileSize.x) ? 1.0 : -1.0;
+        vec2 localPixel=gl_FragCoord.xy-vec2(side<0.0 ? float(tileSize.x) : 0.0,0.0);
+        vec2 mapOrigin=cloudFarCacheOrigin(vec2(mapSize),vec2(tileSize),cameraPosition,vLightWorldDir,side);
+        vec2 xz=mapOrigin+localPixel/vec2(mapSize)*2048.0;
+        float rain,storm,flash;
+        evaluateWeatherState(rain,storm,flash);
+        vec2 nearOrigin=cloudLightCacheOrigin(vec2(mapSize),cameraPosition,vLightWorldDir);
+        vec2 nearPixel=(xz-nearOrigin)/2048.0*vec2(mapSize)-0.5;
+        // Consumers use the near map's interior first. Its overlap is not
+        // integrated again; four guard texels keep bilinear edge taps valid.
+        if (any(lessThan(nearPixel,vec2(4.0)))
+            || any(greaterThan(nearPixel,vec2(mapSize)-5.0))) {
+            outFarCloudLight=vec4(cloudColumnOpticalDepth(vec3(xz.x,64.0,xz.y),vLightWorldDir,
+                frameTimeCounter,mode,rain,storm),1.0);
+        }
+    }
     float depth = texture(depthtex0, vTexCoord).r;
     vec3 viewPos = reconstructViewPos(vTexCoord, depth);
     vec3 ray = normalize(viewPos);
     vec3 worldRay = normalize(mat3(gbufferModelViewInverse) * ray);
     vec3 worldPos = (gbufferModelViewInverse * vec4(viewPos, 1.0)).xyz + cameraPosition;
-    if (isEyeInWater==1) {
-        bool surface=depth<0.999999 && abs(texture(colortex1,vTexCoord).a-0.90)<0.05;
-        // Opaque exterior geometry already exists in the scene. Only replace
-        // sky behind the surface; do not draw an environment over trees/roofs.
-        if ((surface || depth>=0.999999) && texture(depthtex1,vTexCoord).r>=0.999999) {
-            vec3 n=surface ? normalize(mat3(gbufferModelViewInverse)
-                * (texture(colortex1,vTexCoord).rgb*2.0-1.0)) : vec3(0.0,-1.0,0.0);
-            n=waterFacingNormal(worldRay,n);
-            vec3 exitRay=refract(worldRay,n,WATER_REFRACTIVE_INDEX);
-            if (dot(exitRay,exitRay)>1e-5 && exitRay.y>0.0) {
-                vec3 exitView=normalize(transpose(mat3(gbufferModelViewInverse))*exitRay);
-                vec3 environment=evaluateUnifiedSky(exitRay,exitView);
-                environment+=renderNightWuxiaAurora(exitRay,frameTimeCounter,NIGHT_AURORA);
-                applyTexturedCelestialBodies(environment,exitRay);
-                if (mode!=3) {
-                    vec4 cloud=renderWuxiaVolumetricClouds(exitRay,exitView,
-                        surface ? worldPos : cameraPosition,frameTimeCounter,environment,0.0,4200.0,mode,false);
-                    environment=mix(environment,cloud.rgb,cloud.a);
+    if (isEyeInWater == 1) {
+        bool surface = depth < 0.999999 && abs(texture(colortex1, vTexCoord).a - 0.90) < 0.05;
+        if ((surface || depth >= 0.999999) && texture(depthtex1, vTexCoord).r >= 0.999999 && !isUnderwaterSurfaceCoveredByIce(vTexCoord, worldPos - cameraPosition)) {
+            // Refract overhead sky & clouds through the multi-scale trochoidal wave field (waterSurfaceWaves)
+            // so the underwater ceiling shares the exact organic wave facets of the surface without sine-band stripes.
+            float t = frameTimeCounter * WIND_SPEED;
+            vec2 waveCoord = surface ? worldPos.xz : (cameraPosition.xz + worldRay.xz * (8.0 / max(worldRay.y, 0.08)));
+            float approxFootprint = surface ? clamp(length(viewPos) * 0.015, 0.02, 0.85) : 0.12;
+            vec3 waveField = waterSurfaceWaves(waveCoord, t, approxFootprint);
+            vec2 waveRefract = waveField.xy * 1.15 * smoothstep(0.02, 0.45, max(worldRay.y, 0.0));
+            vec3 exitRay = normalize(vec3(worldRay.x + waveRefract.x, max(worldRay.y, 0.03), worldRay.z + waveRefract.y));
+            if (worldRay.y > 0.0) {
+                vec3 exitView = normalize(transpose(mat3(gbufferModelViewInverse)) * exitRay);
+                vec3 environment = evaluateUnifiedSky(exitRay, exitView);
+                applyCelestialsAndAurora(environment, exitRay, frameTimeCounter, NIGHT_AURORA);
+                if (mode != 3) {
+                    vec4 cloud = renderYunMengVolumetricClouds(exitRay, exitView,
+                        cameraPosition, frameTimeCounter, environment, 0.0, 4200.0, mode, false);
+                    environment = mix(environment, cloud.rgb, cloud.a);
                 }
-                outWaterEnvironment=vec4(environment,max(length(viewPos),0.001));
+                if (cameraPosition.y >= AURORA_BASE_Y)
+                    environment += renderNightYunMengAurora(exitRay, frameTimeCounter, NIGHT_AURORA, 0.0);
+                outWaterEnvironment = vec4(environment, max(length(viewPos), 0.001));
             }
         }
         return;
     }
-    if (depth < 0.999999 && abs(texture(colortex1, vTexCoord).a - 0.90) < 0.05) {
-        vec3 normal = normalize(texture(colortex1, vTexCoord).rgb * 2.0 - 1.0);
+    vec2 reflectionUV=vTexCoord;
+    float reflectionDepth=depth;
+    // A thin water row can fall between half-resolution pixel centers. Preserve
+    // a real water sample in the corresponding 2x2 full-resolution footprint.
+    float centerReflTag = texture(colortex1, vTexCoord).a;
+    if (depth>=0.999999 || (abs(centerReflTag-0.90)>=0.05 && abs(centerReflTag-0.825)>=0.015)) {
+        ivec2 fullSize=textureSize(depthtex0,0);
+        ivec2 base=ivec2(floor(vTexCoord*vec2(fullSize)-0.5));
+        for (int y=0;y<2;++y) for (int x=0;x<2;++x) {
+            ivec2 q=clamp(base+ivec2(x,y),ivec2(0),fullSize-1);
+            float z=texelFetch(depthtex0,q,0).r;
+            float qTag=texelFetch(colortex1,q,0).a;
+            if (z<0.999999 && (abs(qTag-0.90)<0.05 || abs(qTag-0.825)<0.015)) {
+                reflectionUV=(vec2(q)+0.5)/vec2(fullSize);reflectionDepth=z;
+            }
+        }
+    }
+    float activeReflTag = texture(colortex1, reflectionUV).a;
+    if (reflectionDepth < 0.999999 && (abs(activeReflTag - 0.90) < 0.05 || abs(activeReflTag - 0.825) < 0.015)) {
+        vec3 viewPos=reconstructViewPos(reflectionUV,reflectionDepth);
+        vec3 ray=normalize(viewPos);
+        vec3 worldPos=(gbufferModelViewInverse*vec4(viewPos,1.0)).xyz+cameraPosition;
+        vec3 normal = normalize(texture(colortex1, reflectionUV).rgb * 2.0 - 1.0);
+        vec3 reflectionNormalWorld = mat3(gbufferModelViewInverse) * normal;
+        bool isIceRefl = abs(activeReflTag - 0.825) < 0.015;
+        if (isIceRefl && reflectionNormalWorld.y <= 0.85) return;
+        bool slopedTop = !isIceRefl && waterIsSlopedTop(texture(colortex2,reflectionUV).a);
+        if (!slopedTop && reflectionNormalWorld.y > 0.85) {
+            vec3 waterPlayer = (gbufferModelViewInverse * vec4(viewPos, 1.0)).xyz;
+            // Metadata is sampled at half resolution. Average its full-resolution
+            // footprint before the nonlinear sky reflection, rather than choosing
+            // one animated wave facet and magnifying its sky/cloud changes.
+            ivec2 normalSize = textureSize(colortex1, 0);
+            ivec2 normalBase = ivec2(floor(reflectionUV * vec2(normalSize) - 0.5));
+            vec3 normalSum = vec3(0.0);
+            float normalWeight = 0.0;
+            for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+                ivec2 q = clamp(normalBase + ivec2(x, y), ivec2(0), normalSize - 1);
+                vec4 normalTag = texelFetch(colortex1, q, 0);
+                if (abs(normalTag.a - 0.90) >= 0.05 && abs(normalTag.a - 0.825) >= 0.015) continue;
+                vec3 tapNormal = normalize(normalTag.xyz * 2.0 - 1.0);
+                if (dot(tapNormal, normal) < 0.8) continue;
+                vec2 tapUV = (vec2(q) + 0.5) / vec2(normalSize);
+                float tapDepth = texelFetch(depthtex0, q, 0).r;
+                vec3 tapPlayer = (gbufferModelViewInverse * vec4(reconstructViewPos(tapUV, tapDepth), 1.0)).xyz;
+                if (tapDepth >= 0.999999 || abs(tapPlayer.y - waterPlayer.y) > 0.25) continue;
+                normalSum += tapNormal;
+                normalWeight += 1.0;
+            }
+            // A lone valid tap is the original fragment. Keep its normal
+            // exactly, including at shore and water-layer boundaries.
+            if (normalWeight > 1.0) normal = normalize(normalSum);
+        }
         vec3 reflectedView = normalize(reflect(ray, normal));
         vec3 reflectedWorld = normalize(mat3(gbufferModelViewInverse) * reflectedView);
+        if (slopedTop || reflectionNormalWorld.y <= 0.85) {
+            reflectedWorld = normalize(vec3(reflectedWorld.x, max(reflectedWorld.y, 0.22), reflectedWorld.z));
+            reflectedView  = normalize(transpose(mat3(gbufferModelViewInverse)) * reflectedWorld);
+        }
         vec3 environment = evaluateUnifiedSky(reflectedWorld, reflectedView);
         // Preserve the broad celestial glow used on water, without a sharp disc.
-        environment += renderNightWuxiaAurora(reflectedWorld, frameTimeCounter, NIGHT_AURORA);
+        vec3 reflectedAurora = renderWorldAurora(worldPos, reflectedWorld, frameTimeCounter, NIGHT_AURORA, 1.0, 1152.0);
+        if (worldPos.y < AURORA_BASE_Y) environment += reflectedAurora;
         #if WATER_REFLECTIONS > 0
         if (mode != 3) {
-            vec4 reflectedCloud = renderWuxiaVolumetricClouds(reflectedWorld, reflectedView,
+            vec4 reflectedCloud = renderYunMengVolumetricClouds(reflectedWorld, reflectedView,
                 worldPos, frameTimeCounter, environment, 0.0, 4200.0, mode, true);
             environment = mix(environment, reflectedCloud.rgb, reflectedCloud.a);
         }
         #endif
-        // Alpha carries the water distance for depth-aware reconstruction.
-        outWaterEnvironment = vec4(environment, length(viewPos));
+        if (worldPos.y >= AURORA_BASE_Y) environment += reflectedAurora;
+        float waterY=(gbufferModelViewInverse*vec4(viewPos,1.0)).y;
+        // Negative height is a stable horizontal-surface identifier at grazing
+        // angles. Positive distance remains the sheet/above-eye fallback.
+        float support=!slopedTop && reflectionNormalWorld.y>0.85 && waterY<0.0 ? min(waterY,-0.0001) : length(viewPos);
+        outWaterEnvironment = vec4(environment, support);
     }
     if (mode == 3) return;
-    bool belowLayer = cameraPosition.y < 164.0 && worldPos.y < 164.0;
-    float backgroundBlend = depth >= 0.999999 ? 1.0 : terrainSkyBlend(worldPos - cameraPosition);
+    bool belowLayer = cameraPosition.y < (CLOUD_ALTITUDE - 16.0) && worldPos.y < (CLOUD_ALTITUDE - 16.0);
+    float rawBorder = depth >= 0.999999 ? 1.0 : terrainSkyBlend(worldPos - cameraPosition);
+    // Only allow background horizon clouds at the very last chunk-unloading edge (>88% border fog)
+    // so solid mid-ground hills and trees never look see-through with background clouds drawn over them.
+    float backgroundBlend = depth >= 0.999999 ? 1.0 : smoothstep(0.88, 0.995, rawBorder);
     if (depth < 0.999999 && belowLayer && backgroundBlend <= 0.001) return;
-    // Fogged terrain dissolves into the same cloudy sky as the unloaded horizon.
-    float maxDistance = (depth >= 0.999999 || belowLayer) ? 4200.0 : length(viewPos);
+    float maxDistance = (depth >= 0.999999 || (belowLayer && backgroundBlend > 0.001)) ? 4200.0 : length(viewPos);
     vec3 sky = evaluateUnifiedSky(worldRay, ray);
-    vec4 cloud = renderWuxiaVolumetricClouds(worldRay, ray, cameraPosition, frameTimeCounter, sky, 0.0, maxDistance, mode, false);
+    vec4 cloud = renderYunMengVolumetricClouds(worldRay, ray, cameraPosition, frameTimeCounter, sky, 0.0, maxDistance, mode, false);
     // Premultiply before interpolation to avoid dark fringes at cloud/sky edges.
-    float fogVisibility = (depth < 0.999999 && belowLayer) ? backgroundBlend : 1.0;
+    float fogVisibility = (depth < 0.999999 && belowLayer) ? (backgroundBlend * backgroundBlend) : 1.0;
     outColor0 = vec4(cloud.rgb * cloud.a, cloud.a) * fogVisibility;
 }
 #else
@@ -1422,8 +1563,8 @@ vec4 resolveClouds(float depth, float viewDist) {
         weights += w;
     }
     if (weights > 0.001) return sum / weights;
-    // A subpixel sky hole can have no valid half-size neighbor. Avoid a second
-    // full-resolution march: nearest premultiplied cloud is a bounded fallback.
+    // Never bleed a half-resolution sky cloud texel onto foreground tree/terrain silhouettes when below clouds!
+    if (depth < 0.999999 && cameraPosition.y < (CLOUD_ALTITUDE - 16.0)) return vec4(0.0);
     return texelFetch(colortex8, clamp(center, ivec2(0), size-1), 0);
 
 }
@@ -1433,6 +1574,7 @@ void main() {
 #endif
     vec4 sceneColor = texture(colortex0, vTexCoord);
     float depth0 = texture(depthtex0, vTexCoord).r;
+    float sceneMaterial = texture(colortex1, vTexCoord).a;
 
     vec3 viewPos   = reconstructViewPos(vTexCoord, depth0);
     vec3 playerPos = (gbufferModelViewInverse * vec4(viewPos, 1.0)).xyz;
@@ -1467,15 +1609,65 @@ void main() {
         float uwRain, uwStorm, uwFlash;
         evaluateWeatherState(uwRain, uwStorm, uwFlash);
         uwFogColor *= mix(1.0, 0.82, uwRain) * mix(1.0, 0.82, uwStorm);
-        bool waterSurface=depth0<0.999999 && abs(texture(colortex1,vTexCoord).a-0.90)<0.05;
-        if ((waterSurface || depth0>=0.999999) && texture(depthtex1,vTexCoord).r>=0.999999) {
-            vec4 environment=reconstructWaterEnvironment(vTexCoord,viewDist);
-            vec3 n=waterSurface ? normalize(mat3(gbufferModelViewInverse)
-                * (texture(colortex1,vTexCoord).rgb*2.0-1.0)) : vec3(0.0,-1.0,0.0);
-            float transmission=waterExitTransmission(worldRayDir,n);
-            finalRadiance=mix(finalRadiance,environment.rgb,environment.a*transmission);
+        bool waterSurface = depth0 < 0.999999 && abs(sceneMaterial - 0.90) < 0.05;
+        float lateralExit = waterSurface ? texture(colortex2, vTexCoord).a : 0.0;
+        if ((waterSurface || depth0 >= 0.999999) && texture(depthtex1, vTexCoord).r >= 0.999999 && !isUnderwaterSurfaceCoveredByIce(vTexCoord, playerPos)) {
+            vec4 environment = reconstructWaterEnvironment(vTexCoord, viewDist);
+            // Continuous underwater ceiling transmission:
+            // - Avoids the harsh circular Snell's window cutoff and avoids per-triangle polygon facets on slopes,
+            // - While keeping a genuine watery tint, grazing internal reflection, and visible surface ripple pattern
+            //   so the water surface overhead looks like real liquid rather than empty air!
+            float upCos = clamp(worldRayDir.y, 0.0, 1.0);
+            float grazingFresnel = pow(1.0 - upCos, 2.4);
+            float distanceFade   = exp(-viewDist * 0.028);
+
+            // Tint the transmitted sky slightly with the water ceiling's jade/turquoise body
+            vec3 waterFilteredSky = mix(environment.rgb, environment.rgb * (STYLE_SELECTION == 0 ? vec3(0.76, 0.95, 0.92) : vec3(0.68, 0.92, 1.02)) + uwFogColor * 0.22, 0.35 + 0.40 * grazingFresnel);
+
+            // Evaluate organic multi-scale trochoidal wave facets & delicate silver-aqua internal reflection glints on the ceiling underside
+            vec2 ceilingUV = waterSurface ? worldPos.xz : (cameraPosition.xz + worldRayDir.xz * (8.0 / max(upCos, 0.08)));
+            float ceilingFootprint = waterSurface
+                ? max(length(dFdx(worldPos.xz)), length(dFdy(worldPos.xz)))
+                : clamp(viewDist * 0.018, 0.03, 0.90);
+            float t = frameTimeCounter * WIND_SPEED;
+            vec3 ceilingWave = waterSurfaceWaves(ceilingUV, t, ceilingFootprint);
+            vec3 ceilingNormal = normalize(vec3(-ceilingWave.x * 1.35, -1.0, -ceilingWave.y * 1.35));
+
+            // Internal reflection and sunlit/moonlit facet glints across the underside of the waves
+            vec3 halfVec = normalize(-worldRayDir + vec3(vLightWorldDir.x, -abs(vLightWorldDir.y), vLightWorldDir.z));
+            float facetGlint = pow(max(dot(ceilingNormal, halfVec), 0.0), 18.0) * 0.42
+                             + smoothstep(0.004, 0.028, ceilingWave.z) * 0.24;
+            vec3 rippleHighlight = (STYLE_SELECTION == 0 ? vec3(0.44, 0.70, 0.66) : vec3(0.24, 0.74, 0.86))
+                                 * mix(0.24, 1.0, vDaylightFactor) * facetGlint * (0.32 + 0.45 * grazingFresnel) * distanceFade;
+
+            float skyTransmission = smoothstep(0.04, 0.60, upCos) * (1.0 - grazingFresnel * 0.50) * mix(0.62, 0.18, lateralExit) * distanceFade;
+            finalRadiance = mix(finalRadiance, waterFilteredSky, environment.a * skyTransmission);
+            finalRadiance += rippleHighlight * (1.0 - lateralExit * 0.65);
         }
-        float uwFogFactor = (depth0 >= 0.999999) ? 0.96 : clamp(1.0 - exp(-viewDist * uwFogDensity), 0.0, 0.96);
+
+        // Animated flowing waterfall sheet detail when standing inside a waterfall looking at its sloped/vertical walls
+        vec3 faceCross = cross(dFdx(worldPos), dFdy(worldPos));
+        vec3 faceNormal = faceCross / max(length(faceCross), 1e-6);
+        float acrossCoord = worldPos.x + worldPos.z * 0.87;
+        vec2 flowCoord = vec2(acrossCoord, worldPos.y);
+        float footprint = max(length(dFdx(flowCoord)), length(dFdy(flowCoord)));
+        if (lateralExit > 0.01) {
+            float flow = waterFallField(worldPos, faceNormal, frameTimeCounter * WIND_SPEED).z;
+            flow = mix(flow, 0.5, smoothstep(0.14, 0.55, footprint));
+            float markings = smoothstep(0.28, 0.72, flow);
+            float opacity = lateralExit * (STYLE_SELECTION == 0
+                ? mix(0.45, 0.75, markings) : mix(0.42, 0.72, markings));
+            vec3 sheetTint = uwFogColor * (STYLE_SELECTION == 0
+                ? vec3(0.68, 0.92, 1.04) : vec3(0.76, 1.02, 1.16));
+            sheetTint *= mix(0.62, 1.38, markings);
+            finalRadiance = mix(finalRadiance, sheetTint, opacity);
+        }
+
+        // Natural underwater depth fog across both terrain and the water ceiling
+        float upLookFogRelief = (1.0 - lateralExit) * smoothstep(0.15, 0.75, max(worldRayDir.y, 0.0)) * 0.32;
+        float uwFogFactor = (depth0 >= 0.999999)
+            ? (0.96 - upLookFogRelief * 0.65)
+            : clamp(1.0 - exp(-viewDist * uwFogDensity * (1.0 - upLookFogRelief)), 0.0, 0.96);
         finalRadiance = mix(finalRadiance * 0.88, uwFogColor, uwFogFactor);
         finalRadiance += computeUnderwaterLightShafts(viewPos, vLightWorldDir, cosTheta);
 
@@ -1489,33 +1681,65 @@ void main() {
     float celestialDiscMask = 0.0;
     float horizonFogWeight  = 1.0;
 
+    vec3 skyAuroraLight = vec3(0.0);
+    vec3 celestialArtAndStars = vec3(0.0);
     if (depth0 >= 0.999999) {
-        float moonStarOcc = smoothstep(0.9965, 0.9982, dot(worldRayDir, vMoonWorldDir));
+        float sunStarOcc  = smoothstep(0.9945, 0.9975, dot(worldRayDir, vSunWorldDir));
         float wetnessNow, stormNow, flashNow;
         evaluateWeatherState(wetnessNow, stormNow, flashNow);
-        vec3 starAdd = sceneColor.rgb * vNightFactor * (1.0 - wetnessNow * 0.96) * (1.0 - moonStarOcc) * smoothstep(0.02, 0.12, worldRayDir.y);
-        vec3 auroraCol = renderNightWuxiaAurora(worldRayDir, frameTimeCounter, NIGHT_AURORA);
-        vec3 skyWithCelestials = unifiedSky + starAdd + auroraCol;
-
+        // Keep stars visible during twilight/sunset as well as night
+        float starTwilightVis = 1.0 - smoothstep(-0.06, 0.14, vSunWorldDir.y);
+        vec3 starAdd = sceneColor.rgb * starTwilightVis * (1.0 - wetnessNow * 0.96)
+                     * (1.0 - sunStarOcc) * smoothstep(-0.20, -0.02, worldRayDir.y);
+        vec3 skyWithCelestials = unifiedSky + starAdd;
         celestialDiscMask = applyTexturedCelestialBodies(skyWithCelestials, worldRayDir);
+        celestialArtAndStars = max(skyWithCelestials - unifiedSky, vec3(0.0));
+        if (cameraPosition.y < AURORA_BASE_Y) {
+            skyAuroraLight = renderNightYunMengAurora(worldRayDir, frameTimeCounter, NIGHT_AURORA, 1.0 - celestialDiscMask);
+            skyWithCelestials += skyAuroraLight;
+        }
         finalRadiance = skyWithCelestials;
     } else {
-        vec4 mistAndBorder = computeValleyMistAndBorderFog(worldPos, playerPos, viewDist, unifiedSky);
+        vec4 mistAndBorder = computeValleyMistAndBorderFog(worldPos, playerPos, viewDist, unifiedSky, worldRayDir, viewRayDir);
+        // Held items are camera foreground, outside the world fog volume.
+        if (abs(sceneMaterial-0.12)<0.007) mistAndBorder.a=0.0;
         horizonFogWeight = mistAndBorder.a;
         finalRadiance = mix(finalRadiance, mistAndBorder.rgb, mistAndBorder.a);
     }
 
-    // Unified 3D Volumetric Clouds (Skip raymarching on below-cloud terrain pixels for major GPU speedup)
-    bool needsCloudTrace = (depth0 >= 0.999999) || (cameraPosition.y > 162.0) || (worldPos.y > 162.0)
-                        || terrainSkyBlend(playerPos) > 0.001;
+    vec3 foregroundAurora = vec3(0.0);
+    if (cameraPosition.y >= AURORA_BASE_Y || depth0 < 0.999999) {
+        if (abs(sceneMaterial - 0.12) >= 0.007)
+            foregroundAurora = renderWorldAurora(cameraPosition, worldRayDir, frameTimeCounter,
+                NIGHT_AURORA, 1.0, depth0 >= 0.999999 ? 1152.0 : viewDist);
+        if (cameraPosition.y < AURORA_BASE_Y) finalRadiance += foregroundAurora;
+    }
+
+    // Translucent Celestial Veil & Aurora Scattering:
+    // Soften cloud opacity over the Sun/Moon disc and forward-scatter the Sun/Moon artwork and stars
+    // through the clouds so they stay softly visible instead of getting harshly covered up!
+    bool needsCloudTrace = (depth0 >= 0.999999) || (cameraPosition.y > CLOUD_ALTITUDE - 16.0) || (worldPos.y > CLOUD_ALTITUDE - 16.0)
+                        || terrainSkyBlend(playerPos) > 0.88;
     if (activeCloudMode != 3 && needsCloudTrace) {
         vec4 volClouds = resolveClouds(depth0, viewDist);
-        finalRadiance = finalRadiance * (1.0-volClouds.a) + volClouds.rgb;
+        // True Cloud-In-Front-Of-Celestial Depth Ordering with Thin-Edge Backlit Translucency:
+        // Keep full cloud opacity (volClouds.a) so Wuxia Smooth and Voxel clouds clearly pass IN FRONT OF
+        // the Sun atlas, Moon atlas, and stars, while allowing thin cloud margins (1.0 - volClouds.a) to
+        // transmit a soft backlit glimpse of the celestial artwork!
+        float effCloudAlpha = clamp(volClouds.a, 0.0, 1.0);
+        vec3 effCloudPremul = volClouds.rgb;
+
+        float thinMarginTrans = (1.0 - effCloudAlpha) * (1.0 - effCloudAlpha) * 0.38 + 0.08;
+        vec3 celestialTrans = celestialArtAndStars * effCloudAlpha * thinMarginTrans;
+        vec3 auroraScatter  = skyAuroraLight * effCloudAlpha * (0.38 + 0.38 * (1.0 - effCloudAlpha));
+        finalRadiance = finalRadiance * (1.0 - effCloudAlpha) + effCloudPremul + celestialTrans + auroraScatter;
     }
+
+    if (cameraPosition.y >= AURORA_BASE_Y) finalRadiance += foregroundAurora;
 
     vec3 shaftViewPos = viewPos;
     float shaftDepth = depth0;
-    float shaftMaterial = texture(colortex1, vTexCoord).a;
+    float shaftMaterial = sceneMaterial;
     if (abs(shaftMaterial - 0.16) < 0.02) {
         vec2 texel = 3.0 / vec2(max(viewWidth, 1.0), max(viewHeight, 1.0));
         float bgDepth = max(

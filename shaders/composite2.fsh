@@ -1,2 +1,2 @@
 #version 330 compatibility
-#include "/lib/sky_atmosphere.glsl"
+#include "/lib/surface_lighting.glsl"

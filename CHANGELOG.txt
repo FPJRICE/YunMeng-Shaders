@@ -1,20 +1,14 @@
-YunMeng Shaders - 0.1.0 Alpha 5
+YunMeng Shaders - 0.1.0 Alpha 6
 
 Added
-- Weather-aware rain, snow, and lightning.
+- Smooth and voxel styles for skies and water, with expanded cloud controls.
+- Layered End portals, flowing-water foam, reflective ice and dynamic held lights.
 
 Changed
-- Reworked clouds for both styles, with more open clear-weather skies.
-- Improved weather fog and lighting, with clearer atmospheric shafts and cloud-controlled underwater beams.
-- Improved water reflections and underwater sky visibility.
-- Refined both suns with softer sky blending and animated glow; enlarged Guofeng's sun.
+- Refined clouds, auroras, water waves, reflections and biome water colors.
+- Updated sun artwork, anti-aliasing, tone mapping and quality presets.
+- Both themes use simple circular moons with eight phases while replacement artwork is prepared.
 
 Fixed
-- Reduced cloud seams, cutoffs, and exposed chunk edges during weather.
-- Smoothed near-water lighting and corrected overly bright reflections.
-- Prevented light shafts from showing over players and other entities.
-- Fixed unwanted land caustics and lightning afterimages.
-
-Known limitations
-- In-game Iris testing is still needed, particularly for the reported near-water circle.
-- Cloud lighting remains approximate, and performance varies by scene.
+- Improved cloud occlusion of celestial artwork, water reflection transitions and foliage shading.
+- Corrected aurora fade expressions for portable shader behavior.

@@ -1,4 +1,4 @@
-# YunMeng Shaders (云梦) — Guofeng Ink & Xianxia Mist Shader Pack — Performance Presets, Style Toggle & Open-Source License
+# YunMeng Shaders (云梦) — Guofeng Ink & Xianxia Mist Shader Pack — Performance Presets, Visual Theme Toggle & Open-Source License
 profile.LOW=§7Low
 profile.MEDIUM=§aMedium
 profile.HIGH=§bHigh
@@ -10,27 +10,32 @@ screen.WATER_SETTINGS=Water
 screen.WIND_FOLIAGE=Wind & Foliage
 screen.CAMERA_SETTINGS=Camera & Post-processing
 
-option.STYLE_SELECTION=Style
+option.STYLE_SELECTION=Visual Theme
 value.STYLE_SELECTION.0=§2Guofeng Ink
 value.STYLE_SELECTION.1=§bXianxia Mist
-option.STYLE_SELECTION.comment=Switches between §2Guofeng Ink§r (Qinglü Shanshui mineral-pigment wash on warm Xuan paper) and §bXianxia Mist§r (cinematic azure skies, jade foliage & luminous sea of clouds).
+option.STYLE_SELECTION.comment=Switches the overall artistic color theme between §2Guofeng Ink§r (Qinglü Shanshui mineral-pigment wash on warm Xuan paper) and §bXianxia Mist§r (cinematic azure skies, jade foliage & luminous sea of clouds).
 
-option.CLOUD_TYPE=Clouds
-value.CLOUD_TYPE.0=Auto (By Style)
-value.CLOUD_TYPE.1=Shanshui 3D
-value.CLOUD_TYPE.2=Cumulus 3D
+option.SKY_STYLE=Shader Style
+value.SKY_STYLE.0=§eWuxia Smooth
+value.SKY_STYLE.1=§aMinecraft Voxel
+option.SKY_STYLE.comment=Master style toggle across the shader pack: switches Clouds, Night Aurora, and Water together between §eWuxia Smooth§r (smooth volumetric clouds, silk auroras & pure 3D wave water) and §aMinecraft Voxel§r (3D blocky clouds, voxel auroras & pixel-textured voxel water).
+
+option.CLOUD_TYPE=Cloud Theme
+value.CLOUD_TYPE.0=Auto (By Theme)
+value.CLOUD_TYPE.1=Guofeng Shanshui
+value.CLOUD_TYPE.2=Xianxia Cumulus
 value.CLOUD_TYPE.3=Off
-option.CLOUD_TYPE.comment=Controls the 3D volumetric cloud engine extending seamlessly from overhead to the horizon.
+option.CLOUD_TYPE.comment=Selects the artistic palette and formation character of the cloud layer (or turns shader clouds Off).
 
 option.NIGHT_AURORA=Night Aurora
-value.NIGHT_AURORA.0=Auto (By Style)
+value.NIGHT_AURORA.0=Auto (By Theme & Style)
 value.NIGHT_AURORA.1=Xianxia Celestial
 value.NIGHT_AURORA.2=Guofeng Jade Silk
 value.NIGHT_AURORA.3=Off
-option.NIGHT_AURORA.comment=Renders a 3D tilted celestial aurora curtain & twinkling stardust stream across the night sky.
+option.NIGHT_AURORA.comment=Automatically uses your Visual Theme (Guofeng Jade Silk or Xianxia Celestial) and your Shader Style (Wuxia Smooth ribbon or Minecraft Voxel pillars).
 
 option.INK_OUTLINES=Outlines
-value.INK_OUTLINES.0=Auto (By Style)
+value.INK_OUTLINES.0=Auto (By Theme)
 value.INK_OUTLINES.1=Subtle
 value.INK_OUTLINES.2=Shanshui
 value.INK_OUTLINES.3=Off
@@ -47,7 +52,13 @@ option.LIGHT_SHAFTS=Light Shafts
 value.LIGHT_SHAFTS.0=Off
 value.LIGHT_SHAFTS.1=Soft
 value.LIGHT_SHAFTS.2=Full
-option.LIGHT_SHAFTS.comment=Sunlight and moonlight shafts in mist and underwater. Soft uses fewer samples and lower intensity; Full uses more samples and stronger shafts.
+option.LIGHT_SHAFTS.comment=Sunlight and moonlight shafts in mist and underwater. Soft gives gentler, shorter beams; Full gives stronger beams. Atmospheric Shaft Quality controls detail in air.
+option.ATMOSPHERIC_SHAFT_QUALITY=Atmospheric Shaft Quality
+value.ATMOSPHERIC_SHAFT_QUALITY.0=Low
+value.ATMOSPHERIC_SHAFT_QUALITY.1=Medium
+value.ATMOSPHERIC_SHAFT_QUALITY.2=High
+value.ATMOSPHERIC_SHAFT_QUALITY.3=Ultra
+option.ATMOSPHERIC_SHAFT_QUALITY.comment=Balances atmospheric beam detail and performance. Higher settings resolve narrow openings more cleanly. Does not change beam strength, mist density, or underwater sampling.
 option.ATMOSPHERIC_SHAFT_STRENGTH=Atmospheric Shaft Strength
 option.ATMOSPHERIC_SHAFT_STRENGTH.comment=Adjusts sunlight and moonlight beams in air. Does not change underwater shafts or general mist density. Direct light must reach the opening.
 
@@ -68,7 +79,6 @@ option.SEA_OF_CLOUDS_ALTITUDE=Mist Altitude
 option.SEA_OF_CLOUDS_THICKNESS=Mist Height
 option.shadowMapResolution=Shadow Resolution
 option.shadowDistance=Shadow Distance
-option.WATER_FOAM_INTENSITY=Shore Foam
 option.WATER_WAVE_HEIGHT=Wave Height
 option.CAUSTICS_STRENGTH=Caustics
 option.WIND_SPEED=Wind Speed
@@ -87,25 +97,26 @@ option.SHADOW_FILTER_QUALITY=Shadow Filtering
 value.SHADOW_FILTER_QUALITY.0=Low
 value.SHADOW_FILTER_QUALITY.1=Medium
 value.SHADOW_FILTER_QUALITY.2=High
-option.FOAM_QUALITY=Shore Foam Quality
-value.FOAM_QUALITY.0=Low
-value.FOAM_QUALITY.1=Medium
-value.FOAM_QUALITY.2=High
-option.FOAM_QUALITY.comment=Controls shoreline sampling detail.
+option.DYNAMIC_LIGHTING=Dynamic Lighting
+value.DYNAMIC_LIGHTING.0=Off
+value.DYNAMIC_LIGHTING.1=Simple
+value.DYNAMIC_LIGHTING.2=Medium
+value.DYNAMIC_LIGHTING.3=High
+option.DYNAMIC_LIGHTING.comment=Hand-held torch and lantern illumination. Simple uses fast radial distance falloff; Medium adds directional surface-normal shading; High adds water specular glints and surface relief.
 
 option.SUN_SIZE.comment=Scales the sun and moon together, including their artwork and rings.
 option.BIOME_TINT_STRENGTH.comment=Controls biome-dependent atmosphere colors. Does not directly change block texture tint.
 option.shadowMapResolution.comment=Higher resolution sharpens shadow detail and uses more GPU memory.
 option.shadowDistance.comment=Shadow rendering distance in blocks. Larger distances cost more and spread the shadow map over a wider area.
 option.SHADOW_FILTER_QUALITY.comment=Controls shadow filtering samples. Higher settings soften edges at a higher rendering cost.
-option.WIND_SPEED.comment=Shared animation speed for foliage, water waves and shoreline foam.
+option.WIND_SPEED.comment=Shared animation speed for foliage and water waves.
 option.WAVING_SUGARCANE.comment=Animates reeds and related mapped plants, including their shadows.
 option.VIGNETTE_STRENGTH=Vignette Strength
 option.VIGNETTE_STRENGTH.comment=Screen-edge shading: silk tint in Guofeng, cinematic darkening in Xianxia, and underwater darkening. 0 disables; 1 retains the original look.
 option.EXPOSURE=Exposure Adjustment
 option.EXPOSURE.comment=Adjusts brightness before the existing tone curve. 0 retains the original look. This is manual artistic exposure, not automatic adaptation.
 option.SATURATION=Saturation
-option.SATURATION.comment=Adjusts color intensity relative to the selected style. 1 retains its original colors.
+option.SATURATION.comment=Adjusts color intensity relative to the selected visual theme. 1 retains its original colors.
 option.PAINTERLY_WASH_STRENGTH=Painterly Wash
 option.PAINTERLY_WASH_STRENGTH.comment=Guofeng only: blends nearby surface colors for a painted appearance. 0 disables; 1 retains the original wash.
 option.PAPER_GRAIN_STRENGTH=Paper Grain
@@ -122,7 +133,7 @@ value.ANTI_ALIASING.0=Off
 value.ANTI_ALIASING.1=Subtle
 value.ANTI_ALIASING.2=Smooth
 value.ANTI_ALIASING.3=Temporal
-option.ANTI_ALIASING.comment=Subtle and Smooth soften edges within each frame. Temporal combines frames to reduce distant shimmer, with higher memory use and possible softness in fine detail.
+option.ANTI_ALIASING.comment=Subtle gently cleans edges while keeping pixel detail crisp. Smooth gives stronger edge cleanup with texture-detail protection. Temporal combines frames to reduce moving shimmer, with possible softness or trails in motion.
 option.MOTION_BLUR=Motion Blur
 value.MOTION_BLUR.0=Off
 value.MOTION_BLUR.1=Fast
@@ -131,3 +142,68 @@ option.MOTION_BLUR.comment=Blurs camera and wind-animated foliage motion while p
 option.MOTION_BLUR_STRENGTH=Motion Blur Strength
 option.MOTION_BLUR_STRENGTH.comment=Controls the shutter effect. 0 disables visible blur; switch Motion Blur to Off to skip the blur pass entirely.
 value.MOTION_BLUR_STRENGTH.0.00=Off
+
+
+option.FLOW_FOAM_STRENGTH=Flow Foam
+option.FLOW_FOAM_STRENGTH.comment=Restrained lacy foam on flowing slopes, thin flow tips and landing contacts. Still shorelines remain clear.
+option.WATER_STYLE=Water Style
+value.WATER_STYLE.0=Auto (By Shader Style)
+value.WATER_STYLE.1=Wuxia Smooth
+value.WATER_STYLE.2=Minecraft Voxel
+option.WATER_STYLE.comment=Automatically follows your Shader Style. Wuxia Smooth renders pure 3D trochoidal waves with smooth caustics and foam; Minecraft Voxel enables the pixel water surface texture with 1/16-block pixel-locked waves, pixel caustics, and pixel flow foam.
+
+option.WATER_TEXTURE=Surface Texture
+option.WATER_TEXTURE.comment=Controls the resource pack or vanilla water surface texture visibility. Auto turns the surface texture Off in Wuxia Smooth and On (68%) in Minecraft Voxel.
+value.WATER_TEXTURE.0.00=Auto
+value.WATER_TEXTURE.0.25=Subtle
+value.WATER_TEXTURE.0.50=Medium
+value.WATER_TEXTURE.0.75=Strong
+value.WATER_TEXTURE.1.00=Full
+
+option.END_PORTAL_LAYERS=End Portal Depth
+option.END_PORTAL_LAYERS.comment=Layered ink islands or celestial clouds inside End portals. More layers add depth and texture sampling.
+value.END_PORTAL_LAYERS.2=Simple
+value.END_PORTAL_LAYERS.3=Layered
+value.END_PORTAL_LAYERS.4=Deep
+screen.CLOUD_SETTINGS=Cloud Settings
+option.CLOUD_SHAPE=Cloud Form
+value.CLOUD_SHAPE.0=Auto (By Shader Style)
+value.CLOUD_SHAPE.1=Soft Volumetric
+value.CLOUD_SHAPE.2=Minecraft Voxel
+value.CLOUD_SHAPE.3=Tall Volumetric
+option.CLOUD_SHAPE.comment=Automatically follows your Shader Style (Wuxia Smooth -> Soft Volumetric; Minecraft Voxel -> sleek dual-layer 3D blocky clouds), or lets you override the cloud geometry manually.
+
+option.CLOUD_COVERAGE=Cloud Coverage
+option.CLOUD_COVERAGE.comment=Controls how much of the fair-weather sky is covered by clouds versus open clear-sky expanses. Rain and storms still form an overcast canopy.
+
+option.CLOUD_DENSITY=Cloud Density
+option.CLOUD_DENSITY.comment=Adjusts the optical thickness and opacity of cloud formations and their cast ground/shaft shadows.
+
+option.CLOUD_ALTITUDE=Cloud Altitude
+option.CLOUD_ALTITUDE.comment=Sets the world Y base height of the cloud layer in blocks.
+
+option.CLOUD_THICKNESS=Cloud Thickness
+option.CLOUD_THICKNESS.comment=Sets the vertical thickness of the cloud layer in blocks. Lower values produce crisper, flatter cloud layers.
+
+option.CLOUD_SCALE=Cloud Scale
+option.CLOUD_SCALE.comment=Scales the horizontal size and spacing of cloud formations. Higher values spread clouds out into broader sheets with wider sky clearings.
+
+option.CLOUD_SPEED=Cloud Speed
+option.CLOUD_SPEED.comment=Controls how fast clouds drift across the sky. Set to 0.00 for stationary clouds.
+value.CLOUD_SPEED.0.00=Stationary
+
+option.CLOUD_RENDER_DISTANCE=Cloud Render Distance
+option.CLOUD_RENDER_DISTANCE.comment=Maximum horizontal distance in blocks at which clouds are traced before fading into horizon mist. Lower values improve performance.
+
+option.CLOUD_RAIN_COVERAGE=Rain & Storm Coverage
+option.CLOUD_RAIN_COVERAGE.comment=Controls how much of the sky fills with clouds during rain and thunderstorms. Lower values keep more open sky breaks for the moon and stars; higher values form a heavier overcast canopy.
+
+option.CLOUD_HORIZON_CURVE=Cloud Horizon Curve
+option.CLOUD_HORIZON_CURVE.comment=Curves the distant cloud dome downward toward the horizon so there is no flat gap between the ground and the bottom of distant clouds.
+value.CLOUD_HORIZON_CURVE.0.000=Flat (0.00)
+value.CLOUD_HORIZON_CURVE.0.030=Subtle (0.03)
+value.CLOUD_HORIZON_CURVE.0.050=Moderate (0.05)
+value.CLOUD_HORIZON_CURVE.0.065=Natural Dome (0.065)
+value.CLOUD_HORIZON_CURVE.0.080=Deep Dome (0.08)
+value.CLOUD_HORIZON_CURVE.0.100=Strong Wrap (0.10)
+value.CLOUD_HORIZON_CURVE.0.120=Full Horizon Wrap (0.12)

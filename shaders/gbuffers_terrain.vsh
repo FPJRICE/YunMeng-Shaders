@@ -146,8 +146,13 @@ void main() {
         vVertexColor.a = 1.0;
     }
 
-    vViewNormal = normalize(gl_NormalMatrix * gl_Normal);
     vMaterialId = int(floor(mc_Entity.x + 0.5));
+    // Cross-model plants (grass, saplings, flowers, reeds, vines, or any 45-degree diagonal cross quad)
+    // must use an upward normal (0, 1, 0) so they match the exact lighting and shadow of the ground block beneath them!
+    bool isCrossModelQuad = (vMaterialId == 8101 || vMaterialId == 8104 || vMaterialId == 8105)
+                         || (abs(gl_Normal.y) < 0.15 && abs(gl_Normal.x) > 0.20 && abs(gl_Normal.z) > 0.20);
+    vec3 effNormal = isCrossModelQuad ? vec3(0.0, 1.0, 0.0) : gl_Normal;
+    vViewNormal = normalize(gl_NormalMatrix * effNormal);
 
     vec4 viewPos = gl_ModelViewMatrix * gl_Vertex;
     vec4 playerPos = gbufferModelViewInverse * viewPos;

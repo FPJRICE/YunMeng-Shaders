@@ -75,3 +75,20 @@ https://creativecommons.org/publicdomain/zero/1.0/
 Ken Perlin, Improving Noise (2002).
 Reference credit for the quintic interpolation polynomial and its derivative;
 no claim of authorship of that mathematical foundation is made by YunMeng.
+
+
+6. ADDITIONAL TECHNIQUE REFERENCES
+
+Volumetric clouds: Guerrilla Games, Andrew Schneider and Nathan Vos,
+Nubis: Authoring Real-Time Volumetric Cloudscapes with the Decima Engine.
+https://www.guerrilla-games.com/read/nubis-authoring-real-time-volumetric-cloudscapes-with-the-decima-engine
+
+Water waves: Mark Finch, Effective Water Simulation from Physical Models,
+GPU Gems, Chapter 1.
+https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-1-effective-water-simulation-physical-models
+
+Fog integration: Milton Abramowitz and Irene A. Stegun, Handbook of
+Mathematical Functions, equation 7.1.26 (error-function approximation).
+
+These entries record technique references already named in the shader source.
+They do not grant a license to external code or artwork, or imply endorsement.
