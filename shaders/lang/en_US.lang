@@ -207,3 +207,20 @@ value.CLOUD_HORIZON_CURVE.0.065=Natural Dome (0.065)
 value.CLOUD_HORIZON_CURVE.0.080=Deep Dome (0.08)
 value.CLOUD_HORIZON_CURVE.0.100=Strong Wrap (0.10)
 value.CLOUD_HORIZON_CURVE.0.120=Full Horizon Wrap (0.12)
+
+option.END_GLYPH_STYLE=End Void Glyphs
+value.END_GLYPH_STYLE.0=Auto (By Shader Style)
+value.END_GLYPH_STYLE.1=§eClassical Chinese (太虛·歸墟)
+value.END_GLYPH_STYLE.2=§aEnchanting Table (SGA)
+value.END_GLYPH_STYLE.3=Off
+option.END_GLYPH_STYLE.comment=Selects the astral glyphs rendered along The End's silk-scroll waves and voxel wave crests. Auto follows your Shader Style (Wuxia Smooth -> Classical Chinese brush calligraphy; Minecraft Voxel -> Standard Galactic Alphabet runes).
+
+option.EMISSIVE_EYES_MODE=Glowing Eyes & Emissives
+value.EMISSIVE_EYES_MODE.0=Off
+value.EMISSIVE_EYES_MODE.1=Standard (Eyes + _e/_s)
+value.EMISSIVE_EYES_MODE.2=§bAuto + Pack (Integrated)
+option.EMISSIVE_EYES_MODE.comment=Controls glowing mob eyes and emissive textures. Standard enables vanilla eye layers (gbuffers_spidereyes), OptiFine/ETF _e.png overlays, and LabPBR _s.png maps. Auto + Pack also detects custom colored eyes and markings on dark-bodied mobs (such as Endermen and Spiders) in resource packs without _e or _s files.
+
+option.EMISSIVE_BLOOM_STRENGTH=Eye Glow Bloom
+value.EMISSIVE_BLOOM_STRENGTH.0.00=Off
+option.EMISSIVE_BLOOM_STRENGTH.comment=Controls the soft Gaussian bloom halo around glowing mob eyes and markings. 0 disables the outer halo while keeping the eyes bright; 1 retains the balanced default glow.

@@ -254,11 +254,11 @@ float cloudShaftHoleTransmittance(vec3 origin, vec3 lightDir, float time, int mo
     vec2 p1  = origin.xz + lightDir.xz * ((h1 - origin.y) / effLightY);
     vec2 w1  = (p1 - cloudWind(time)) / effScale;
 
-    // Evenly distributed medium-scale sun-break selector (~280-block spacing) so shafts appear
-    // balanced across all sky directions without clumping on one side of the sky!
-    float breakA = textureLod(cloudTex, fract(w1 * 0.00155 + vec2(0.19, 0.63)), 0.0).g;
-    float breakB = textureLod(cloudTex, fract(w1 * 0.00290 + vec2(0.53, 0.27)), 0.0).b;
-    float pocketGate = smoothstep(0.54, 0.74, breakA * 0.58 + breakB * 0.42);
+    // Evenly distributed medium-scale sun-break selector (~160-block spacing) so shafts appear
+    // evenly distributed across the sky without wide dead zones or clumping!
+    float breakA = textureLod(cloudTex, fract(w1 * 0.00220 + vec2(0.19, 0.63)), 0.0).g;
+    float breakB = textureLod(cloudTex, fract(w1 * 0.00410 + vec2(0.53, 0.27)), 0.0).b;
+    float pocketGate = smoothstep(0.42, 0.66, breakA * 0.56 + breakB * 0.44);
 
     #if (CLOUD_SHAPE == 2) || (CLOUD_SHAPE == 0 && SKY_STYLE == 1)
     float threshLow = 0.695 + (0.50 - effCov) * 0.36;
@@ -267,23 +267,28 @@ float cloudShaftHoleTransmittance(vec3 origin, vec3 lightDir, float time, int mo
     float sigCont1 = evalContinuousCloudField(w1, mode);
     float sigVox1  = evalVoxelCellSignal(floor(w1 / 10.0), 10.0, mode);
     float sig1     = mix(sigCont1, sigVox1, 0.35);
-    float open1    = 1.0 - smoothstep(threshLow - 0.045, threshLow + 0.020, sig1);
+    float open1    = 1.0 - smoothstep(threshLow - 0.055, threshLow + 0.025, sig1);
 
     float h2 = max(base + 30.1, origin.y);
     vec2 p2  = origin.xz + lightDir.xz * ((h2 - origin.y) / effLightY);
     vec2 w2  = ((p2 - cloudWind(time) * 0.72) / effScale) + vec2(240.0, -190.0);
     float sig2  = evalContinuousCloudField(w2, mode);
-    float open2 = 1.0 - 0.55 * smoothstep(threshUp - 0.050, threshUp + 0.030, sig2);
+    float open2 = 1.0 - 0.50 * smoothstep(threshUp - 0.055, threshUp + 0.030, sig2);
 
-    return (open1 * open1) * open2 * (0.28 + 0.72 * pocketGate);
+    return (open1 * open1) * open2 * mix(0.45, 1.0, pocketGate);
     #else
-    // Fast, crisp opening evaluation for Wuxia Smooth (Soft Volumetric) clouds:
-    float hCore = max(base + (top - base) * 0.34, origin.y);
-    vec3 posCore = vec3(origin.x + lightDir.x * ((hCore - origin.y) / effLightY), hCore, origin.z + lightDir.z * ((hCore - origin.y) / effLightY));
-    float lh, det;
-    float densCore = cloudDensity(posCore, hCore, time, mode, rain, storm, 20.0, lh, det);
-    float tr = exp(-densCore * 2.2);
-    return (tr * tr) * (0.32 + 0.68 * pocketGate);
+    // Smooth, balanced 2-level opening evaluation for Wuxia Smooth (Soft Volumetric) clouds:
+    // Every genuine cloud opening and thin bay margin casts a clean crepuscular shaft!
+    float hLow  = max(base + (top - base) * 0.22, origin.y);
+    float hHigh = max(base + (top - base) * 0.52, origin.y);
+    vec3 posLow  = vec3(origin.x + lightDir.x * ((hLow  - origin.y) / effLightY), hLow,  origin.z + lightDir.z * ((hLow  - origin.y) / effLightY));
+    vec3 posHigh = vec3(origin.x + lightDir.x * ((hHigh - origin.y) / effLightY), hHigh, origin.z + lightDir.z * ((hHigh - origin.y) / effLightY));
+    float lh1, det1, lh2, det2;
+    float densLow  = cloudDensity(posLow,  hLow,  time, mode, rain, storm, 20.0, lh1, det1);
+    float densHigh = cloudDensity(posHigh, hHigh, time, mode, rain, storm, 26.0, lh2, det2);
+    float tr = exp(-(densLow * 1.45 + densHigh * 0.85));
+    float openHole = smoothstep(0.08, 0.78, tr);
+    return openHole * mix(0.48, 1.0, pocketGate);
     #endif
 }
 

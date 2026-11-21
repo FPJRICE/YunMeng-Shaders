@@ -77,11 +77,28 @@ uniform vec4 lightningBoltPosition;
 uniform float wetness;
 uniform float near;
 uniform float far;
+uniform float fogStart;
 uniform float fogEnd;
 uniform int isEyeInWater;
 uniform int moonPhase;
 uniform int heldBlockLightValue;
 uniform int heldBlockLightValue2;
+uniform bool firstPersonCamera;
+uniform vec3 relativeEyePosition;
+
+vec3 evaluateHandPlayerOrigin() {
+    if (firstPersonCamera) {
+        return vec3(0.0, -0.35, 0.0);
+    }
+    vec3 camForwardWorld = normalize(mat3(gbufferModelViewInverse) * vec3(0.0, 0.0, -1.0));
+    vec3 headOffsetPlayer = (dot(relativeEyePosition, camForwardWorld) < 0.0)
+        ? -relativeEyePosition
+        : relativeEyePosition;
+    if (length(headOffsetPlayer) < 0.05) {
+        headOffsetPlayer = camForwardWorld * 3.85;
+    }
+    return headOffsetPlayer + vec3(0.0, -0.35, 0.0);
+}
 #define BIOME_TINT_STRENGTH 1.00 // [0.00 0.50 0.75 1.00 1.15 1.25 1.50]
 uniform float inBambooJungle;
 uniform float inMountainBiome;
@@ -89,6 +106,7 @@ uniform float inCherryGrove;
 uniform float inSnowyBiome;
 uniform float inAridBiome;
 uniform float inSwampBiome;
+uniform float inTheEnd;
 
 // Iris reads format directives from GLSL lines beginning with const.
 // Keep each declaration on its own line inside this block comment.
@@ -187,7 +205,7 @@ vec3 computeShadowVisibility(vec3 playerPos, vec3 viewNormal, float NdotL) {
     return mix(vec3(1.0), accumulatedShadow / float(FILTER_TAPS), horizonShadowFade * coverage);
 }
 
-vec3 applyYunMengCanvasGrading(vec3 radiance, float matTag, float shadowLuma) {
+vec3 applyYunMengCanvasGrading(vec3 radiance, float matTag, float shadowLuma, float blockLight) {
     const vec3 LUMA_WEIGHTS = vec3(0.2126, 0.7152, 0.0722);
     float luma = dot(radiance, LUMA_WEIGHTS);
 
@@ -216,11 +234,12 @@ vec3 applyYunMengCanvasGrading(vec3 radiance, float matTag, float shadowLuma) {
             -0.05,  1.10, -0.03,
             -0.04, -0.02,  1.08
         );
-        if (abs(matTag - 0.90) < 0.05) {
-            graded = max(XIANXIA_WATER_MATRIX * radiance, vec3(0.0));
+        bool isAboveWaterSurface = (isEyeInWater == 0) && (abs(matTag - 0.90) < 0.05);
+        if (isAboveWaterSurface) {
+            graded = max(XIANXIA_WATER_MATRIX * radiance, vec3(0.0)) * 0.84;
         }
         float nightDesat = mix(0.56, 1.0, vDaylightFactor);
-        float colorRetention = ((abs(matTag - 0.90) < 0.05) ? 1.18 : 1.12) * nightDesat;
+        float colorRetention = (isAboveWaterSurface ? 1.18 : 1.12) * nightDesat;
         vec3 vibrantXianxia = max(mix(vec3(luma), graded, colorRetention), vec3(0.0));
 
         vec3 silkWarmth = mix(vec3(0.86, 0.92, 1.00), vec3(1.00, 0.99, 0.96), vDaylightFactor);
@@ -229,8 +248,8 @@ vec3 applyYunMengCanvasGrading(vec3 radiance, float matTag, float shadowLuma) {
         vec3 shadedXianxia = mix(vibrantXianxia * silkWarmth * 0.86 * celestialShadowTint, vibrantXianxia * silkWarmth, smoothstep(0.0, 0.85, shadowLuma));
 
         // Preserve native crimson/red lava hue and dark-crust vs. bright-vein contrast in Xianxia Mist
-        // without over-brightening dark crust texels or shifting red lava toward orange.
-        if (matTag < 0.05) {
+        // strictly on emissive lava (matTag == 0.04 or level-15 blockLight > 0.95), never on sunlit red terrain blocks!
+        if (abs(matTag - 0.04) < 0.01 || (matTag < 0.05 && blockLight > 0.95)) {
             float moltenMask = smoothstep(0.18, 0.48, radiance.r - max(radiance.g * 1.75, radiance.b * 2.50));
             if (moltenMask > 0.001) {
                 float rCurved = pow(max(radiance.r - 0.18, 0.02), 2.45) * 0.42;
@@ -245,14 +264,21 @@ vec3 applyYunMengCanvasGrading(vec3 radiance, float matTag, float shadowLuma) {
 }
 
 vec3 evaluateReflectedTerrainLit(vec2 uvProj, float rawDepth, vec3 directLightColor, vec3 skyAmbientColor, float ambientFloor, vec3 rayOriginPlayer, out vec3 hitPlayerPos) {
-    vec3 hitAlbedo = pow(texture(colortex0, uvProj).rgb, vec3(2.2));
-    vec4 hitNormSample = texture(colortex1, uvProj);
+    ivec2 c1Size = textureSize(colortex1, 0);
+    ivec2 hitTexel = clamp(ivec2(uvProj * vec2(c1Size)), ivec2(0), c1Size - ivec2(1));
+    vec3 hitAlbedo = pow(texelFetch(colortex0, hitTexel, 0).rgb, vec3(2.2));
+    vec4 hitNormSample = texelFetch(colortex1, hitTexel, 0);
     vec3 hitNormal = normalize(hitNormSample.rgb * 2.0 - 1.0);
     float hitMatTag = hitNormSample.a;
     if (isYunMengEndPortal(hitMatTag)) {
         vec3 portalView = reconstructViewPos(uvProj, rawDepth);
         hitPlayerPos = (gbufferModelViewInverse * vec4(portalView, 1.0)).xyz;
         return pow(renderYunMengEndPortal(hitPlayerPos, hitPlayerPos - rayOriginPlayer), vec3(2.2));
+    }
+    if (hitMatTag > 0.335 && hitMatTag < 0.475) {
+        vec3 eyeView = reconstructViewPos(uvProj, rawDepth);
+        hitPlayerPos = (gbufferModelViewInverse * vec4(eyeView, 1.0)).xyz;
+        return hitAlbedo * 1.15;
     }
 
     vec4 hitLm = texture(colortex2, uvProj);
@@ -283,7 +309,7 @@ vec3 evaluateReflectedTerrainLit(vec2 uvProj, float rawDepth, vec3 directLightCo
     #if DYNAMIC_LIGHTING > 0
     float reflHeld = float(max(heldBlockLightValue, heldBlockLightValue2)) / 15.0;
     if (reflHeld > 0.001) {
-        float hitHandDist = length(vHandPlayerOrigin - hitPlayerPos);
+        float hitHandDist = length(evaluateHandPlayerOrigin() - hitPlayerPos);
         float hitLinear = smoothstep(0.0, 1.0, (1.0 - clamp(hitHandDist / max(15.0 * reflHeld, 0.001), 0.0, 1.0)) * reflHeld);
         hitDynTorch = (pow(hitLinear, 1.85) * 0.68 + pow(hitLinear, 3.6) * 0.52) * hitAo;
     }
@@ -292,7 +318,7 @@ vec3 evaluateReflectedTerrainLit(vec2 uvProj, float rawDepth, vec3 directLightCo
     hitShadow = mix(1.0, hitShadow, smoothstep(0.00, 0.035, dot(vLightViewDir, vUpViewDir)));
     vec3 hitTotalLight = hitAmbient + directLightColor * wrapNdotL * hitShadow + hitLantern;
     vec3 hitLit = hitAlbedo * hitTotalLight;
-    return applyYunMengCanvasGrading(hitLit, hitMatTag, hitShadow);
+    return applyYunMengCanvasGrading(hitLit, hitMatTag, hitShadow, hitBlockLight);
 }
 
 // Tight, fine-scale 3D noise-refracted water caustics (3.2 to 4.6 ripples per block):
@@ -348,6 +374,7 @@ vec3 evaluateBiomeWaterMod() {
     float wBamboo = clamp(inBambooJungle * bStr, 0.0, 1.0);
     float wCherry = clamp(inCherryGrove  * bStr, 0.0, 1.0);
     float wArid   = clamp(inAridBiome    * bStr, 0.0, 1.0);
+    float wPale   = evaluatePaleGardenWeight();
 
     vec3 modCol = vec3(1.0);
     if (STYLE_SELECTION == 0) {
@@ -356,12 +383,14 @@ vec3 evaluateBiomeWaterMod() {
         modCol = mix(modCol, vec3(0.88, 1.08, 0.90), wBamboo * 0.45);
         modCol = mix(modCol, vec3(1.18, 1.02, 1.12), wCherry * 0.42);
         modCol = mix(modCol, vec3(0.95, 1.06, 0.98), wArid   * 0.40);
+        modCol = mix(modCol, vec3(0.92, 0.78, 0.74), wPale   * 0.75);
     } else {
         modCol = mix(modCol, vec3(1.35, 0.92, 0.52), wSwamp  * 0.65);
         modCol = mix(modCol, vec3(0.85, 0.72, 1.18), wSnowy  * 0.55);
         modCol = mix(modCol, vec3(0.92, 1.12, 0.88), wBamboo * 0.45);
         modCol = mix(modCol, vec3(1.25, 1.08, 1.18), wCherry * 0.45);
         modCol = mix(modCol, vec3(1.05, 1.14, 1.06), wArid   * 0.42);
+        modCol = mix(modCol, vec3(1.12, 0.76, 0.68), wPale   * 0.75);
     }
     return modCol;
 }
@@ -401,6 +430,120 @@ void evaluateSceneWeatherAndOpening(vec3 origin, out float wetnessFactor, out fl
 
 #include "/lib/water_environment.glsl"
 #include "/lib/water_waves.glsl"
+
+// Full-resolution, derivative-antialiased reflected night starfield for water & ice:
+// Evaluates crisp pinpoint stars at native screen resolution (never half-res upsampled smudges),
+// energy-conserves over rippled wave normals via fwidth(), and respects clouds, moon, weather & SSR occlusion.
+float starReflHash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+// Procedural raindrop impact ripples on wet upward ground & water surfaces:
+// - Wuxia Smooth (SKY_STYLE == 0): concentric circular silk-mist rings
+// - Minecraft Voxel (SKY_STYLE == 1): crisp 1px-snapped expanding square rings
+float evaluateRainRippleLayer(vec2 worldXZ, float t, float cellScale, float seedOff) {
+    vec2 p = (SKY_STYLE == 1) ? (floor(worldXZ * 16.0) / 16.0) : worldXZ;
+    vec2 g = p * cellScale;
+    vec2 id = floor(g);
+    vec2 f  = fract(g);
+
+    float h0 = starReflHash12(id + vec2(seedOff, seedOff * 1.7));
+    if (h0 < 0.42) return 0.0;
+    float h1 = starReflHash12(id + vec2(19.3 + seedOff, 47.1));
+    float h2 = starReflHash12(id + vec2(61.7, 23.9 + seedOff));
+
+    float life = fract(t * (0.72 + 0.45 * h0) + h1);
+    vec2 center = vec2(0.24 + 0.52 * h1, 0.24 + 0.52 * h2);
+    vec2 d = f - center;
+
+    float radius = life * 0.46;
+    float fade   = smoothstep(0.0, 0.10, life) * pow(1.0 - life, 1.55);
+
+    if (SKY_STYLE == 1) {
+        float distSq = max(abs(d.x), abs(d.y));
+        float ring = 1.0 - smoothstep(0.020, 0.055, abs(distSq - radius));
+        float bead = (1.0 - smoothstep(0.02, 0.06, distSq)) * smoothstep(0.22, 0.0, life);
+        return (ring * 0.85 + bead * 0.65) * fade;
+    } else {
+        float distC = length(d);
+        float mainRing  = exp(-pow((distC - radius) / 0.032, 2.0));
+        float innerRing = exp(-pow((distC - max(radius - 0.10, 0.0)) / 0.026, 2.0)) * 0.55 * smoothstep(0.22, 0.45, life);
+        float mistPuff  = exp(-pow(distC / 0.055, 2.0)) * smoothstep(0.24, 0.0, life) * 0.50;
+        return (mainRing + innerRing + mistPuff) * fade;
+    }
+}
+
+float evaluateRainImpactRipples(vec2 worldXZ, float time) {
+    float r1 = evaluateRainRippleLayer(worldXZ, time, 0.85, 11.3);
+    float r2 = evaluateRainRippleLayer(worldXZ + vec2(0.47, 0.31), time * 1.12, 1.15, 37.9);
+    return clamp(r1 + r2 * 0.80, 0.0, 1.0);
+}
+
+vec3 evaluateFullResReflectedStars(vec3 reflWorld, vec3 waterWorldPos, float wetnessFactor, float stormFactor) {
+    if (inTheEnd > 0.5 || reflWorld.y <= 0.05) return vec3(0.0);
+    float starTwilightVis = (1.0 - smoothstep(-0.09, 0.01, vSunWorldDir.y)) * (1.0 - evaluatePaleGardenWeight() * 0.90);
+    float clearNight = (1.0 - wetnessFactor * 0.96) * (1.0 - stormFactor * 0.96);
+    float horizonGate = smoothstep(0.06, 0.28, reflWorld.y);
+    float moonClear = 1.0 - smoothstep(0.990, 0.997, dot(reflWorld, vMoonWorldDir));
+    float vis = starTwilightVis * clearNight * horizonGate * moonClear;
+    if (vis <= 0.002) return vec3(0.0);
+
+    vec3 dir = normalize(reflWorld);
+    vec3 absD = abs(dir);
+    vec2 cubeUV;
+    float faceId;
+    if (absD.y >= absD.x && absD.y >= absD.z) {
+        cubeUV = dir.xz / max(absD.y, 1e-4);
+        faceId = (dir.y >= 0.0) ? 1.0 : 2.0;
+    } else if (absD.x >= absD.z) {
+        cubeUV = dir.zy / max(absD.x, 1e-4);
+        faceId = (dir.x >= 0.0) ? 3.0 : 4.0;
+    } else {
+        cubeUV = dir.xy / max(absD.z, 1e-4);
+        faceId = (dir.z >= 0.0) ? 5.0 : 6.0;
+    }
+
+    float gridScale = (SKY_STYLE == 1) ? 54.0 : 64.0;
+    vec2 gPos = cubeUV * gridScale;
+    vec2 cell = floor(gPos);
+    vec2 fUV  = fract(gPos);
+    vec2 fw   = max(fwidth(gPos), vec2(0.04));
+
+    float h0 = starReflHash12(cell + vec2(faceId * 17.3, faceId * 31.7));
+    if (h0 < 0.942) return vec3(0.0);
+
+    float h1 = starReflHash12(cell + vec2(43.1, 19.7) + faceId * 11.1);
+    float h2 = starReflHash12(cell + vec2(71.9, 53.3) + faceId * 23.9);
+    vec2 starCenter = vec2(0.22 + 0.56 * h1, 0.22 + 0.56 * h2);
+    vec2 delta = fUV - starCenter;
+
+    float footprint = max(fw.x, fw.y);
+    float radius = clamp(footprint * 0.62, 0.045, 0.16);
+    float d = (SKY_STYLE == 1)
+        ? max(abs(delta.x), abs(delta.y))
+        : length(delta);
+    float pinpoint = 1.0 - smoothstep(radius * 0.45, radius * 1.15, d);
+    if (pinpoint <= 0.001) return vec3(0.0);
+
+    // Energy-conserving attenuation when steep water waves stretch the footprint
+    float energyKeep = clamp(0.075 / max(footprint, 0.075), 0.18, 1.0);
+
+    // Cloud occlusion along the reflected ray so reflected clouds naturally block stars
+    int cloudMode = (CLOUD_TYPE == 0) ? (STYLE_SELECTION == 0 ? 1 : 2) : CLOUD_TYPE;
+    float cloudClear = (cloudMode == 3) ? 1.0
+        : cloudLightTransmission(waterWorldPos, dir, frameTimeCounter, cloudMode, wetnessFactor, stormFactor);
+
+    float starTier = smoothstep(0.942, 0.998, h0);
+    float twinkle  = 0.76 + 0.24 * sin(frameTimeCounter * (0.9 + 1.5 * h2) + h1 * 6.2831853);
+
+    vec3 warmStar = (STYLE_SELECTION == 0) ? vec3(1.00, 0.88, 0.66) : vec3(0.95, 0.92, 0.82);
+    vec3 coolStar = (STYLE_SELECTION == 0) ? vec3(0.66, 0.86, 0.82) : vec3(0.64, 0.84, 1.05);
+    vec3 starCol  = mix(coolStar, warmStar, h1);
+
+    return starCol * (pinpoint * energyKeep * (0.22 + 0.72 * starTier) * twinkle * cloudClear * vis);
+}
 
 vec3 computeWaterSurfaceReflection(
     vec3 viewPos,
@@ -538,7 +681,7 @@ vec3 computeWaterSurfaceReflection(
                     continue;
                 }
 
-                float hitTag = texture(colortex1, uvProj).a;
+                ivec2 c1S = textureSize(colortex1, 0); float hitTag = texelFetch(colortex1, clamp(ivec2(uvProj * vec2(c1S)), ivec2(0), c1S - ivec2(1)), 0).a;
                 // If uvProj is still on the water surface or a held item,depthtex1 is the riverbed behind water;
                 // do not treat the riverbed as an above-water reflection hit.
                 if (abs(hitTag - 0.90) < 0.05 || abs(hitTag - 0.12) < 0.007) {
@@ -571,7 +714,7 @@ vec3 computeWaterSurfaceReflection(
                             vec2 refUV = (refClip.xy / refClip.w) * 0.5 + 0.5 + cameraJitter(frameCounter, vec2(viewWidth, viewHeight));
                             if (all(greaterThan(refUV, vec2(0.005))) && all(lessThan(refUV, vec2(0.995)))) {
                                 float refRaw = texture(depthtex1, refUV).r;
-                                float refTag = texture(colortex1, refUV).a;
+                                float refTag = texelFetch(colortex1, clamp(ivec2(refUV * vec2(c1S)), ivec2(0), c1S - ivec2(1)), 0).a;
                                 if (refRaw < 0.9999 && abs(refTag - 0.90) >= 0.05 && abs(refTag - 0.12) >= 0.007) {
                                     hitUV = refUV;
                                     hitRawDepth = refRaw;
@@ -601,6 +744,13 @@ vec3 computeWaterSurfaceReflection(
         }
     }
     #endif
+
+    // Full-resolution pinpoint night star reflections (occluded by SSR terrain, clouds, caves, and horizon mist)
+    if (vNightFactor > 0.01 && ssrOcclusion < 0.98 && skyOpenAccess > 0.02) {
+        vec3 reflWorldStar = normalize(mat3(gbufferModelViewInverse) * fullRefl);
+        vec3 reflStars = evaluateFullResReflectedStars(reflWorldStar, waterWorldPos, wetnessFactor, stormFactor);
+        skyRefl += reflStars * (1.0 - ssrOcclusion) * skyOpenAccess * upwardWater;
+    }
 
     if (!allowCelestialShimmer) {
         return skyRefl;
@@ -726,8 +876,20 @@ void shadeSurface() {
         outColor0 = vec4(renderYunMengEndPortal(portalPlayer, portalPlayer), 1.0);
         return;
     }
-
     vec4 lmSample = texture(colortex2, vTexCoord);
+    // Strict integer texelFetch material tag check for emissive eyes (0.36 or additive 0.46):
+    // NEVER uses bilinear texture() or colortex2.a, eliminating 100% of silhouette-edge & particle false positives!
+    ivec2 surfTexSize = textureSize(colortex1, 0);
+    ivec2 surfCoord   = clamp(ivec2(vTexCoord * vec2(surfTexSize)), ivec2(0), surfTexSize - 1);
+    float exactMatTag = texelFetch(colortex1, surfCoord, 0).a;
+    if (exactMatTag > 0.335 && exactMatTag < 0.475) {
+        // Keep linear eye radiance in the sweet spot (0.95) where ACES preserves 100% of the eye's saturated hue
+        // instead of compressing all 3 channels to white!
+        // Preserve the sclera vs. pupil hue & brightness contrast already prepared in gbuffers_spidereyes / gbuffers_entities
+        vec3 eyeRadiance = albedo * 0.96;
+        outColor0 = vec4(pow(max(eyeRadiance, vec3(0.0)), vec3(1.0 / 2.2)), 1.0);
+        return;
+    }
     float blockLight = lmSample.r;
     float skyLight   = lmSample.g;
     float vertexAo   = abs(matTag-0.90)<0.05 ? 1.0 : lmSample.b;
@@ -801,9 +963,16 @@ void shadeSurface() {
     skyAmbientColor = mix(skyAmbientColor, vec3(0.38, 0.46, 0.60) * bAmbScale * 2.4, clamp(inSnowyBiome,   0.0, 1.0) * 0.30);
     skyAmbientColor = mix(skyAmbientColor, vec3(0.52, 0.44, 0.32) * bAmbScale * 2.4, clamp(inAridBiome,    0.0, 1.0) * 0.32);
     skyAmbientColor = mix(skyAmbientColor, vec3(0.30, 0.38, 0.30) * bAmbScale * 2.4, clamp(inSwampBiome,   0.0, 1.0) * 0.30);
+    float paleAmbW = evaluatePaleGardenWeight();
+    if (paleAmbW > 0.001) {
+        vec3 paleAmb = mix(vec3(0.016, 0.016, 0.018), vec3(0.24, 0.23, 0.22), vDaylightFactor);
+        skyAmbientColor = mix(skyAmbientColor, paleAmb, paleAmbW * 0.85);
+        directLightColor = mix(directLightColor, vec3(dot(directLightColor, vec3(0.2126, 0.7152, 0.0722))) * 0.82, paleAmbW * 0.70);
+    }
+    float endDimensionWeight = clamp(inTheEnd, 0.0, 1.0);
 
     if (isEyeInWater == 1) {
-        vec3 uwTint = ((STYLE_SELECTION == 0) ? vec3(0.42, 0.68, 0.65) : vec3(0.22, 0.68, 0.76)) * evaluateBiomeWaterMod();
+        vec3 uwTint = ((STYLE_SELECTION == 0) ? vec3(0.42, 0.68, 0.65) : vec3(0.34, 0.74, 0.82)) * evaluateBiomeWaterMod();
         directLightColor *= uwTint * 0.72;
         skyAmbientColor  *= uwTint * 0.68;
     }
@@ -845,7 +1014,7 @@ void shadeSurface() {
     #if DYNAMIC_LIGHTING > 0
     float heldStrength = float(max(heldBlockLightValue, heldBlockLightValue2)) / 15.0;
     if (heldStrength > 0.001) {
-        vec3 activeHandOrigin = vHandPlayerOrigin;
+        vec3 activeHandOrigin = evaluateHandPlayerOrigin();
         vec3 toLightPlayer = activeHandOrigin - playerPos;
         float handDist = length(toLightPlayer);
 
@@ -866,10 +1035,14 @@ void shadeSurface() {
         float handNdotL = isFoliageOrBamboo
             ? (0.88 + 0.18 * max(dot(viewNormal, handLightDirView), 0.0))
             : (isWaterSurface ? 0.92 : (0.82 + 0.24 * clamp((dot(viewNormal, handLightDirView) + 0.45) / 1.45, 0.0, 1.0)));
-        bool isTrueEntity = (abs(matTag - 0.10) < 0.015);
-        if (abs(matTag - 0.12) < 0.007 || (isTrueEntity && handDist < 1.35)) {
+        bool isPlayerOrHeldItem = (abs(matTag - 0.10) < 0.015 || abs(matTag - 0.06) < 0.015);
+        if (abs(matTag - 0.12) < 0.007) {
             handNdotL = 0.95;
             radialAtten = max(radialAtten, 0.82 * pow(heldStrength, 2.2));
+        } else if (isPlayerOrHeldItem) {
+            float nearPlayerW = 1.0 - smoothstep(0.65, 1.75, handDist);
+            handNdotL = mix(handNdotL, 0.92, nearPlayerW);
+            radialAtten = mix(radialAtten, max(radialAtten, 0.72 * pow(heldStrength, 2.2)), nearPlayerW);
         }
         #if DYNAMIC_LIGHTING >= 3
         // High (High/Ultra presets): subtle albedo micro-relief contrast + grazing rim + water surface specular glints
@@ -895,6 +1068,27 @@ void shadeSurface() {
 
     float directCornerAo = isWaterSurface ? 1.0 : (mix(0.42, 1.0, cornerAo) * faceAxisShade);
     vec3 totalLighting = ambientLight + directLightColor * wrapNdotL * shadowVis * directCornerAo + lanternLight;
+    if (endDimensionWeight > 0.001) {
+        // Distortion-Free 3D Diagonal Celestial & Cavern/Step Relief Lighting in The End:
+        // - Does NOT use Iris's horizon-locked shadow map (so zero frustum-cutoff or player shadow distortion!).
+        // - Combines full cornerAo (pow(vertexAo, 2.25) * ssCreaseAo) and directCornerAo with a 42-degree diagonal
+        //   celestial light direction (-0.54, 0.56, -0.63) so caverns, overhangs, and back-facing terrace steps have
+        //   deep, sculptural shadow while top terraces and light-facing risers are warmly illuminated!
+        const vec3 endHaloDirWorld = vec3(-0.540, 0.560, -0.628);
+        float rawEndDot    = dot(worldNorm, endHaloDirWorld);
+        float endHaloNdotL = smoothstep(-0.28, 0.72, rawEndDot);
+        float endUpFacing  = clamp(worldNorm.y * 0.5 + 0.5, 0.0, 1.0);
+        float diagFaceMod  = isWaterSurface ? 1.0 : (0.80 + 0.28 * clamp(rawEndDot * 0.6 + 0.4, 0.0, 1.0));
+
+        vec3 endShadowAmb  = (STYLE_SELECTION == 0) ? vec3(0.016, 0.024, 0.020) : vec3(0.014, 0.026, 0.030);
+        vec3 endMidAmb     = (STYLE_SELECTION == 0) ? vec3(0.038, 0.045, 0.038) : vec3(0.036, 0.048, 0.050);
+        vec3 endTerraceLit = (STYLE_SELECTION == 0) ? vec3(0.068, 0.064, 0.050) : vec3(0.064, 0.068, 0.062);
+
+        vec3 endDomeLighting = mix(endShadowAmb, endMidAmb, endUpFacing) * cornerAo * diagFaceMod
+                             + endTerraceLit * endHaloNdotL * smoothstep(-0.35, 0.55, worldNorm.y) * directCornerAo
+                             + lanternLight;
+        totalLighting = mix(totalLighting, endDomeLighting, endDimensionWeight);
+    }
     vec3 litRadiance   = albedo * totalLighting;
 
     if (isWaterSurface && isEyeInWater == 0) {
@@ -1089,11 +1283,28 @@ void shadeSurface() {
         }
     }
 
+    // Procedural raindrop impact ripples on sky-exposed wet ground & water surfaces
+    float liquidRainGate = clamp(rainStrength, 0.0, 1.0) * (1.0 - clamp(inSnowyBiome, 0.0, 1.0))
+                         * (1.0 - clamp(inAridBiome, 0.0, 1.0)) * (1.0 - endDimensionWeight);
+    if (liquidRainGate > 0.02 && isEyeInWater == 0 && !isEntity && !isFoliageOrBamboo && worldNorm.y > 0.84) {
+        float rippleDistFade = 1.0 - smoothstep(14.0, 30.0, length(playerPos));
+        float rainOpenSky    = smoothstep(0.84, 0.96, skyLight);
+        float rippleMask     = liquidRainGate * rippleDistFade * rainOpenSky;
+        if (rippleMask > 0.005) {
+            float rippleVal = evaluateRainImpactRipples(worldPos.xz, frameTimeCounter * max(WIND_SPEED, 0.45));
+            vec3 rippleTint = (STYLE_SELECTION == 0)
+                ? mix(vec3(0.045, 0.065, 0.075), vec3(0.32, 0.38, 0.38), vDaylightFactor)
+                : mix(vec3(0.045, 0.070, 0.095), vec3(0.30, 0.40, 0.48), vDaylightFactor);
+            float surfaceGain = isWaterSurface ? 0.34 : 0.20;
+            litRadiance += rippleTint * (rippleVal * surfaceGain * rippleMask);
+        }
+    }
+
     float shadowLuma = clamp(dot(shadowVis, vec3(0.3333)), 0.0, 1.0);
     // Shadow grading must fade with direct lighting too. Otherwise an unlit
     // east/west face still changes its ambient tint when the source swaps.
     shadowLuma = mix(1.0, shadowLuma, sourceVisibility);
-    vec3 gradedRadiance = applyYunMengCanvasGrading(litRadiance, matTag, shadowLuma);
+    vec3 gradedRadiance = applyYunMengCanvasGrading(litRadiance, matTag, shadowLuma, blockLight);
 
     outColor0 = vec4(pow(max(gradedRadiance, vec3(0.0)), vec3(1.0 / 2.2)), 1.0);
 }

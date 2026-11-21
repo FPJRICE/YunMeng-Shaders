@@ -1,6 +1,6 @@
 # YunMeng Shaders
 
-Current build: **0.1.0-alpha.6**. The shaders pass compilation and linking checks on NVIDIA. This build still needs an in-game Iris check.
+Current build: **0.1.0-alpha.7**. All 352 tested shader program/profile combinations pass local OpenGL compilation and linking on an NVIDIA OpenGL 4.6 driver. In-game Iris verification for this build is pending.
 
 ## Performance benchmarks
 
@@ -28,16 +28,16 @@ The styles are artistic interpretations, not accurate depictions of Chinese cult
 
 ## Features
 
-- Dynamic skies, volumetric clouds, valley mist and auroras
-- Lighting, shadows, light shafts, and wind-animated foliage
-- Water waves, reflections, caustics, and underwater atmosphere
+- Dynamic skies, volumetric clouds, valley mist, auroras, and custom End skies
+- Lighting, shadows, light shafts, attachment-aware foliage sway, and glowing mob eyes
+- Water waves, reflections, caustics, rain ripples, splashes, and underwater atmosphere
 - Sun lens flare, anti-aliasing, camera motion blur, and four quality presets
 
-Both themes use simple circular moons with eight phases while replacement artwork is prepared for Build 7.
+Guofeng Ink uses updated custom moon artwork with eight phases; Xianxia Mist retains the simple circular eight-phase moon for now.
 
 ## Installation
 
-Install Iris, place `YunMeng_Shaders_0.1.0-alpha.6.zip` in your `shaderpacks` folder, then select it in Minecraft's shader settings. Keep the ZIP intact.
+Install Iris, place `YunMeng_Shaders_0.1.0-alpha.7.zip` in your `shaderpacks` folder, then select it in Minecraft's shader settings. Keep the ZIP intact.
 
 ## License and source
 

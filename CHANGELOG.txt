@@ -1,14 +1,19 @@
-YunMeng Shaders - 0.1.0 Alpha 6
+YunMeng Shaders - 0.1.0 Alpha 7
 
 Added
-- Smooth and voxel styles for skies and water, with expanded cloud controls.
-- Layered End portals, flowing-water foam, reflective ice and dynamic held lights.
+- Custom End sky with flowing gold-trimmed silk-scroll waves and centered pale-gold brush calligraphy in Wuxia Smooth, plus 3D wave columns with enchanting-style runes in Minecraft Voxel.
+- Configurable End void glyphs (Classical Chinese, Brush/Pixel SGA, or Off), varied-angle End starfield, and atmospheric End depth fog.
+- Updated Guofeng Moon artwork with eight lunar phases and atmospheric blending.
+- Glowing mob eyes and emissive markings support with configurable eye-glow bloom.
+- Full-resolution night star reflections on water and ice behind clouds and terrain.
+- Procedural rain rework with ground/water impact ripples, harmonized splash particles, and distant rain-curtain mist.
 
 Changed
-- Refined clouds, auroras, water waves, reflections and biome water colors.
-- Updated sun artwork, anti-aliasing, tone mapping and quality presets.
-- Both themes use simple circular moons with eight phases while replacement artwork is prepared.
+- Harmonized Sun, Moon, cloud, and light-shaft blending across all biome skyboxes and weather states.
+- Darkened End block and terrain lighting to match the misty End atmosphere.
+- Categorized foliage sway by attachment type so surface clingers stay pinned, wall vines never clip into blocks, and hanging strands sway from their tips.
 
 Fixed
-- Improved cloud occlusion of celestial artwork, water reflection transitions and foliage shading.
-- Corrected aurora fade expressions for portable shader behavior.
+- Fixed dithered glowing speckles on cherry tree water reflections at night.
+- Improved Xianxia Mist underwater surface blending and distant land outline visibility.
+- Fixed third-person dynamic held-light flickering.

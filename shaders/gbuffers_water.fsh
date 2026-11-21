@@ -325,15 +325,15 @@ void main() {
         float uwFresnel = pow(1.0 - clamp(abs(dot(continuousCeilingWorldNormal, viewRayWorld)), 0.0, 1.0), 3.0);
 
         if (STYLE_SELECTION == 0) {
-            vec3 ceilingTint = mix(vec3(0.18, 0.36, 0.38), vec3(0.32, 0.54, 0.52), uwFresnel * 0.55) * biomeChromaMod;
+            vec3 ceilingTint = mix(vec3(0.18, 0.36, 0.38), vec3(0.32, 0.54, 0.52), uwFresnel * 0.65) * biomeChromaMod;
             vec3 wallTint    = vec3(0.24, 0.46, 0.47) * biomeChromaMod;
             finalWaterColor  = mix(ceilingTint, wallTint, nearExit);
-            finalAlpha       = clamp(mix(0.36 + uwFresnel * 0.24, 0.58, nearExit), 0.34, 0.72);
+            finalAlpha       = clamp(mix(0.56 + uwFresnel * 0.34, 0.70, nearExit), 0.54, 0.92);
         } else {
-            vec3 ceilingTint = mix(vec3(0.05, 0.24, 0.35), vec3(0.12, 0.46, 0.58), uwFresnel * 0.60) * biomeChromaMod;
-            vec3 wallTint    = vec3(0.09, 0.38, 0.50) * biomeChromaMod;
+            vec3 ceilingTint = mix(vec3(0.10, 0.36, 0.46), vec3(0.16, 0.50, 0.60), uwFresnel * 0.75) * biomeChromaMod;
+            vec3 wallTint    = vec3(0.12, 0.42, 0.52) * biomeChromaMod;
             finalWaterColor  = mix(ceilingTint, wallTint, nearExit);
-            finalAlpha       = clamp(mix(0.34 + uwFresnel * 0.26, 0.56, nearExit), 0.32, 0.70);
+            finalAlpha       = clamp(mix(0.58 + uwFresnel * 0.34, 0.70, nearExit), 0.56, 0.92);
         }
         float effWaterTexUW = (WATER_TEXTURE > 0.0) ? WATER_TEXTURE : ((ACTIVE_WATER_STYLE == 2) ? 0.62 : 0.0);
         if (effWaterTexUW > 0.0) {

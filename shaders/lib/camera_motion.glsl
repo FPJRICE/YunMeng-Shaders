@@ -23,7 +23,7 @@ float linearDepth(float d) {
     return (2.0 * near * far) / max(far + near - (2.0 * d - 1.0) * (far - near), 0.00001);
 }
 bool handPixel(ivec2 p) { return abs(texelFetch(colortex1, p, 0).a - 0.12) < 0.007; }
-bool entityPixel(ivec2 p) { return abs(texelFetch(colortex1, p, 0).a - 0.10) < 0.007; }
+bool entityPixel(ivec2 p) { float a = texelFetch(colortex1, p, 0).a; return abs(a - 0.10) < 0.007 || (a > 0.335 && a < 0.475); }
 bool cameraHistoryUsable() {
     if (frameCounter < 2 || frameTime <= 0.0 || frameTime > 0.10) return false;
     if (length(cameraPosition - previousCameraPosition) > 4.0) return false;

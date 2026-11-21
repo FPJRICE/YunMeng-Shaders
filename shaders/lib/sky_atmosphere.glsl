@@ -57,23 +57,30 @@ uniform float viewHeight;
 uniform float viewWidth;
 uniform float far;
 uniform float near;
+uniform float fogStart;
 uniform float fogEnd;
 uniform float rainStrength;
 uniform float rainFactor;
 uniform float thunderStrength;
 uniform vec4 lightningBoltPosition;
 uniform vec3 skyColor;
+uniform vec3 fogColor;
 uniform float eyeAltitude;
 uniform int frameCounter;
 uniform int isEyeInWater;
 uniform int moonPhase;
 
+uniform float biomeTemp;
+uniform float biomeRain;
 uniform float inBambooJungle;
 uniform float inMountainBiome;
 uniform float inCherryGrove;
 uniform float inSnowyBiome;
 uniform float inAridBiome;
 uniform float inSwampBiome;
+uniform float inTheEnd;
+
+
 uniform float eyeSkyFactor;
 #ifndef YUNMENG_CLOUD_PREPASS
 #define YUNMENG_CLOUD_LIGHT_CACHE
@@ -81,7 +88,22 @@ uniform float eyeSkyFactor;
 #include "/lib/water_fall.glsl"
 #endif
 #include "/lib/cloud_field.glsl"
+#include "/lib/end_portal.glsl"
 #include "/lib/air_fog.glsl"
+
+// Uses Iris's 3-second smoothed biome_category uniforms directly so standard temperate biomes
+// (Oak Forest, Birch Forest, Dark Forest, Plains, Meadow, Taiga, River) keep the clean default sky
+// and never falsely trigger Swamp green or red/pink skybox flickers.
+void evaluateSmoothBiomeWeights(out float wBamboo, out float wMountain, out float wCherry,
+                                out float wSnowy, out float wArid, out float wSwamp) {
+    float bStr = clamp(BIOME_TINT_STRENGTH, 0.0, 1.5);
+    wBamboo   = clamp(inBambooJungle  * bStr, 0.0, 1.0);
+    wMountain = clamp(inMountainBiome * bStr, 0.0, 1.0);
+    wCherry   = clamp(inCherryGrove   * bStr, 0.0, 1.0);
+    wSnowy    = clamp(inSnowyBiome    * bStr, 0.0, 1.0);
+    wArid     = clamp(inAridBiome     * bStr, 0.0, 1.0);
+    wSwamp    = clamp(inSwampBiome    * bStr, 0.0, 1.0);
+}
 
 
 #ifdef YUNMENG_CLOUD_PREPASS
@@ -348,57 +370,111 @@ void getLuminousCloudPalette(out vec3 cDeepFold, out vec3 cMidFold, out vec3 cWa
     cWarmMid = mix(cWarmMid, duskTint * 0.72, afterglow * 0.30);
     cSunCrest = mix(cSunCrest, duskTint, afterglow * 0.38);
 
-    // Cohesive Biome Cloud Tinting: shift cloud bases and midtones toward the active biome atmosphere
-    float bScale = (vDaylightFactor * vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
-    float wBamboo = clamp(inBambooJungle * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float wCherry = clamp(inCherryGrove  * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float wSnowy  = clamp(inSnowyBiome   * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float wArid   = clamp(inAridBiome    * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float wSwamp  = clamp(inSwampBiome   * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    // Full-Dome Biome Cloud Palette Replacement (Clear, Rain, & Storm):
+    // Shift all 4 cloud registers (cDeepFold, cMidFold, cWarmMid, cSunCrest) and silverRimColor
+    // into the active biome's color world across both clear and rainy weather so clouds never clash!
+    float bCloudGate = mix(0.36, 1.0, vDaylightFactor) * mix(1.0, 0.78, wetnessFactor);
+    float wRainDamp  = mix(1.0, 0.68, wetnessFactor) * mix(1.0, 0.76, stormFactor);
+    float wBamboo, wMountain, wCherry, wSnowy, wArid, wSwamp;
+    evaluateSmoothBiomeWeights(wBamboo, wMountain, wCherry, wSnowy, wArid, wSwamp);
+    float altitudeMountainHint = smoothstep(110.0, 160.0, eyeAltitude);
+    wMountain = clamp(max(wMountain, altitudeMountainHint * 0.55 * BIOME_TINT_STRENGTH), 0.0, 1.0);
 
-    cDeepFold = mix(cDeepFold, vec3(0.22, 0.46, 0.42) * bScale, wBamboo * 0.38);
-    cMidFold  = mix(cMidFold,  vec3(0.48, 0.74, 0.68) * bScale, wBamboo * 0.30);
+    if (wBamboo > 0.001) {
+        cDeepFold = mix(cDeepFold, mix(vec3(0.04, 0.09, 0.07), vec3(0.18, 0.42, 0.31) * wRainDamp, vDaylightFactor), wBamboo * 0.84 * bCloudGate);
+        cMidFold  = mix(cMidFold,  mix(vec3(0.07, 0.14, 0.11), vec3(0.38, 0.66, 0.50) * wRainDamp, vDaylightFactor), wBamboo * 0.80 * bCloudGate);
+        cWarmMid  = mix(cWarmMid,  mix(vec3(0.10, 0.18, 0.15), vec3(0.62, 0.84, 0.70) * wRainDamp, vDaylightFactor), wBamboo * 0.74 * bCloudGate);
+        cSunCrest = mix(cSunCrest, mix(vec3(0.13, 0.22, 0.18), vec3(0.78, 0.94, 0.82) * wRainDamp, vDaylightFactor), wBamboo * 0.68 * bCloudGate);
+        silverRimColor = mix(silverRimColor, vec3(0.66, 0.90, 0.76) * mix(0.28, 1.0, vDaylightFactor), wBamboo * 0.70 * bCloudGate);
+    }
+    if (wMountain > 0.001) {
+        cDeepFold = mix(cDeepFold, mix(vec3(0.05, 0.07, 0.09), vec3(0.32, 0.40, 0.46) * wRainDamp, vDaylightFactor), wMountain * 0.78 * bCloudGate);
+        cMidFold  = mix(cMidFold,  mix(vec3(0.08, 0.10, 0.13), vec3(0.54, 0.62, 0.68) * wRainDamp, vDaylightFactor), wMountain * 0.74 * bCloudGate);
+        cWarmMid  = mix(cWarmMid,  mix(vec3(0.11, 0.14, 0.17), vec3(0.74, 0.80, 0.84) * wRainDamp, vDaylightFactor), wMountain * 0.68 * bCloudGate);
+        cSunCrest = mix(cSunCrest, mix(vec3(0.14, 0.18, 0.21), vec3(0.88, 0.92, 0.95) * wRainDamp, vDaylightFactor), wMountain * 0.62 * bCloudGate);
+        silverRimColor = mix(silverRimColor, vec3(0.80, 0.86, 0.92) * mix(0.28, 1.0, vDaylightFactor), wMountain * 0.65 * bCloudGate);
+    }
+    if (wCherry > 0.001) {
+        cDeepFold = mix(cDeepFold, mix(vec3(0.08, 0.06, 0.10), vec3(0.46, 0.32, 0.44) * wRainDamp, vDaylightFactor), wCherry * 0.86 * bCloudGate);
+        cMidFold  = mix(cMidFold,  mix(vec3(0.12, 0.09, 0.14), vec3(0.72, 0.52, 0.66) * wRainDamp, vDaylightFactor), wCherry * 0.82 * bCloudGate);
+        cWarmMid  = mix(cWarmMid,  mix(vec3(0.16, 0.12, 0.18), vec3(0.90, 0.72, 0.82) * wRainDamp, vDaylightFactor), wCherry * 0.76 * bCloudGate);
+        cSunCrest = mix(cSunCrest, mix(vec3(0.20, 0.15, 0.22), vec3(0.98, 0.84, 0.90) * wRainDamp, vDaylightFactor), wCherry * 0.70 * bCloudGate);
+        silverRimColor = mix(silverRimColor, vec3(0.96, 0.78, 0.86) * mix(0.28, 1.0, vDaylightFactor), wCherry * 0.72 * bCloudGate);
+    }
+    if (wSnowy > 0.001) {
+        cDeepFold = mix(cDeepFold, mix(vec3(0.07, 0.08, 0.12), vec3(0.42, 0.48, 0.58) * wRainDamp, vDaylightFactor), wSnowy * 0.82 * bCloudGate);
+        cMidFold  = mix(cMidFold,  mix(vec3(0.10, 0.12, 0.17), vec3(0.66, 0.72, 0.82) * wRainDamp, vDaylightFactor), wSnowy * 0.78 * bCloudGate);
+        cWarmMid  = mix(cWarmMid,  mix(vec3(0.13, 0.16, 0.21), vec3(0.82, 0.87, 0.94) * wRainDamp, vDaylightFactor), wSnowy * 0.72 * bCloudGate);
+        cSunCrest = mix(cSunCrest, mix(vec3(0.16, 0.20, 0.26), vec3(0.92, 0.95, 0.99) * wRainDamp, vDaylightFactor), wSnowy * 0.66 * bCloudGate);
+        silverRimColor = mix(silverRimColor, vec3(0.88, 0.92, 0.98) * mix(0.28, 1.0, vDaylightFactor), wSnowy * 0.70 * bCloudGate);
+    }
+    if (wArid > 0.001) {
+        cDeepFold = mix(cDeepFold, mix(vec3(0.08, 0.07, 0.05), vec3(0.48, 0.38, 0.25) * wRainDamp, vDaylightFactor), wArid * 0.86 * bCloudGate);
+        cMidFold  = mix(cMidFold,  mix(vec3(0.12, 0.10, 0.08), vec3(0.74, 0.59, 0.39) * wRainDamp, vDaylightFactor), wArid * 0.82 * bCloudGate);
+        cWarmMid  = mix(cWarmMid,  mix(vec3(0.16, 0.13, 0.10), vec3(0.90, 0.75, 0.52) * wRainDamp, vDaylightFactor), wArid * 0.76 * bCloudGate);
+        cSunCrest = mix(cSunCrest, mix(vec3(0.20, 0.17, 0.12), vec3(0.98, 0.86, 0.64) * wRainDamp, vDaylightFactor), wArid * 0.70 * bCloudGate);
+        silverRimColor = mix(silverRimColor, vec3(0.98, 0.82, 0.56) * mix(0.28, 1.0, vDaylightFactor), wArid * 0.72 * bCloudGate);
+    }
+    if (wSwamp > 0.001) {
+        cDeepFold = mix(cDeepFold, mix(vec3(0.04, 0.07, 0.04), vec3(0.22, 0.30, 0.18) * wRainDamp, vDaylightFactor), wSwamp * 0.88 * bCloudGate);
+        cMidFold  = mix(cMidFold,  mix(vec3(0.07, 0.10, 0.07), vec3(0.38, 0.46, 0.30) * wRainDamp, vDaylightFactor), wSwamp * 0.84 * bCloudGate);
+        cWarmMid  = mix(cWarmMid,  mix(vec3(0.10, 0.13, 0.09), vec3(0.54, 0.62, 0.44) * wRainDamp, vDaylightFactor), wSwamp * 0.78 * bCloudGate);
+        cSunCrest = mix(cSunCrest, mix(vec3(0.13, 0.17, 0.12), vec3(0.68, 0.74, 0.56) * wRainDamp, vDaylightFactor), wSwamp * 0.72 * bCloudGate);
+        silverRimColor = mix(silverRimColor, vec3(0.70, 0.78, 0.56) * mix(0.28, 1.0, vDaylightFactor), wSwamp * 0.74 * bCloudGate);
+    }
 
-    cDeepFold = mix(cDeepFold, vec3(0.46, 0.36, 0.48) * bScale, wCherry * 0.38);
-    cMidFold  = mix(cMidFold,  vec3(0.80, 0.66, 0.78) * bScale, wCherry * 0.32);
-
-    cDeepFold = mix(cDeepFold, vec3(0.32, 0.44, 0.64) * bScale, wSnowy  * 0.40);
-    cMidFold  = mix(cMidFold,  vec3(0.66, 0.76, 0.90) * bScale, wSnowy  * 0.32);
-
-    cDeepFold = mix(cDeepFold, vec3(0.48, 0.40, 0.32) * bScale, wArid   * 0.42);
-    cMidFold  = mix(cMidFold,  vec3(0.82, 0.70, 0.54) * bScale, wArid   * 0.36);
-
-    cDeepFold = mix(cDeepFold, vec3(0.28, 0.36, 0.30) * bScale, wSwamp  * 0.42);
-    cMidFold  = mix(cMidFold,  vec3(0.52, 0.60, 0.50) * bScale, wSwamp  * 0.34);
+    float wPaleGarden = evaluatePaleGardenWeight();
+    if (wPaleGarden > 0.001) {
+        vec3 paleDeep  = mix(vec3(0.068, 0.068, 0.072), vec3(0.25, 0.24, 0.23), vDaylightFactor);
+        vec3 paleMid   = mix(vec3(0.095, 0.095, 0.100), vec3(0.37, 0.36, 0.35), vDaylightFactor);
+        vec3 paleWarm  = mix(vec3(0.118, 0.118, 0.124), vec3(0.46, 0.44, 0.43), vDaylightFactor);
+        vec3 paleCrest = mix(vec3(0.145, 0.145, 0.152), vec3(0.55, 0.53, 0.51), vDaylightFactor);
+        cDeepFold = mix(cDeepFold, paleDeep,  wPaleGarden * 0.96);
+        cMidFold  = mix(cMidFold,  paleMid,   wPaleGarden * 0.96);
+        cWarmMid  = mix(cWarmMid,  paleWarm,  wPaleGarden * 0.96);
+        cSunCrest = mix(cSunCrest, paleCrest, wPaleGarden * 0.94);
+        silverRimColor = mix(silverRimColor, vec3(0.58, 0.56, 0.54) * mix(0.28, 1.0, vDaylightFactor), wPaleGarden * 0.92);
+    }
 }
 
 void applyCelestialCloudGlow(vec3 worldRayDir, float thinnessFactor, inout vec3 cloudColor) {
     float wetnessFactor, stormFactor, lightningFlash;
     evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
-    float clearFactor = (1.0 - wetnessFactor * 0.75) * (1.0 - stormFactor * 0.75);
+    float clearFactor = pow(clamp(1.0 - wetnessFactor * 0.96, 0.0, 1.0), 2.0) * (1.0 - stormFactor * 0.96);
 
     float cosSun  = max(dot(worldRayDir, vSunWorldDir), 0.0);
     float cosMoon = max(dot(worldRayDir, vMoonWorldDir), 0.0);
 
+    float pgGlowDamp = 1.0 - evaluatePaleGardenWeight() * 0.86;
+    clearFactor *= pgGlowDamp;
     if (vDaylightFactor > 0.01 && clearFactor > 0.001) {
         float sunZoneWide = pow(cosSun, (STYLE_SELECTION == 0 ? 5.0 : 4.0)) * vDaylightFactor;
         float sunZoneMid  = pow(cosSun, (STYLE_SELECTION == 0 ? 14.0 : 10.0)) * vDaylightFactor;
         float sunZoneCore = pow(cosSun, (STYLE_SELECTION == 0 ? 42.0 : 32.0)) * vDaylightFactor;
 
+        float cBam, cMtn, cChr, cSnw, cArd, cSwp;
+        evaluateSmoothBiomeWeights(cBam, cMtn, cChr, cSnw, cArd, cSwp);
         vec3 dayGlowWide = (STYLE_SELECTION == 0)
             ? mix(vec3(0.98, 0.76, 0.46), vec3(1.06, 0.58, 0.30), vSunsetFactor)
             : mix(vec3(1.04, 0.86, 0.58), vec3(1.12, 0.64, 0.36), vSunsetFactor);
         vec3 dayGlowCore = (STYLE_SELECTION == 0) ? vec3(1.08, 0.90, 0.60) : vec3(1.16, 0.96, 0.70);
 
+        // Harmonize solar cloud silver-lining with active biome skybox palette
+        dayGlowWide = mix(dayGlowWide, vec3(0.76, 0.84, 0.58), cSwp * 0.65);
+        dayGlowWide = mix(dayGlowWide, vec3(0.68, 0.88, 0.72), cBam * 0.60);
+        dayGlowWide = mix(dayGlowWide, vec3(0.96, 0.74, 0.84), cChr * 0.65);
+        dayGlowWide = mix(dayGlowWide, vec3(0.86, 0.90, 0.96), cSnw * 0.60);
+        dayGlowWide = mix(dayGlowWide, vec3(0.78, 0.84, 0.88), cMtn * 0.50);
+
         cloudColor = mix(cloudColor, max(cloudColor, dayGlowWide * clearFactor), sunZoneWide * 0.48 * clearFactor);
         cloudColor += dayGlowWide * (sunZoneMid * 0.42) * thinnessFactor * clearFactor;
-        cloudColor += dayGlowCore * (sunZoneCore * 0.58) * thinnessFactor * clearFactor;
+        cloudColor += mix(dayGlowCore, dayGlowWide * 1.12, max(max(cSwp, cBam), max(cChr, cSnw)) * 0.55) * (sunZoneCore * 0.58) * thinnessFactor * clearFactor;
     }
 
     if (vNightFactor > 0.01 && clearFactor > 0.001) {
         float moonWideZone = pow(cosMoon, 5.0) * vNightFactor * clearFactor;
         float moonRimZone  = pow(cosMoon, 24.0) * vNightFactor * clearFactor;
-        vec3 moonRimTint   = (STYLE_SELECTION == 0) ? vec3(0.40, 0.58, 0.64) : vec3(0.42, 0.64, 0.92);
+        vec3 moonRimTint   = (STYLE_SELECTION == 0) ? vec3(0.58, 0.68, 0.60) : vec3(0.42, 0.64, 0.92);
         cloudColor += moonRimTint * (moonWideZone * 0.16 + moonRimZone * 0.38 * thinnessFactor) * clearFactor;
     }
 
@@ -418,12 +494,9 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
     float VdotM = dot(viewRayDir, vMoonViewDir);
 
     float altitudeMountainHint = smoothstep(110.0, 160.0, eyeAltitude);
-    float bambooWeight   = clamp(inBambooJungle * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float mountainWeight = clamp(max(inMountainBiome, altitudeMountainHint * 0.55) * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float cherryWeight   = clamp(inCherryGrove * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float snowyWeight    = clamp(inSnowyBiome * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float aridWeight     = clamp(inAridBiome * BIOME_TINT_STRENGTH, 0.0, 1.0);
-    float swampWeight    = clamp(inSwampBiome * BIOME_TINT_STRENGTH, 0.0, 1.0);
+    float bambooWeight, mountainWeight, cherryWeight, snowyWeight, aridWeight, swampWeight;
+    evaluateSmoothBiomeWeights(bambooWeight, mountainWeight, cherryWeight, snowyWeight, aridWeight, swampWeight);
+    mountainWeight = clamp(max(mountainWeight, altitudeMountainHint * 0.55 * BIOME_TINT_STRENGTH), 0.0, 1.0);
 
     vec3 zenithCol, midCol, horizonCol;
 
@@ -485,63 +558,115 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
         horizonCol = mix(horizonCol, mix(rainHorizon, stormHorizon, stormFactor), wetnessFactor);
     }
 
-    // Daytime biome colors scale smoothly to 0 at night so warm yellow/amber/olive daytime tints
-    // NEVER turn the midnight horizon or sky into muddy brown! At night, subtle cool moonlight shifts apply instead.
-    float dayBiomeGate = (vDaylightFactor * vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
-    vec3 bambooJade   = mix(vec3(0.038, 0.072, 0.088), (STYLE_SELECTION == 0) ? vec3(0.46, 0.78, 0.68) : vec3(0.32, 0.80, 0.70), vDaylightFactor);
-    vec3 mountainGray = mix(vec3(0.048, 0.072, 0.112), (STYLE_SELECTION == 0) ? vec3(0.68, 0.78, 0.84) : vec3(0.58, 0.74, 0.90), vDaylightFactor);
-    vec3 cherryRose   = mix(vec3(0.062, 0.068, 0.112), vec3(0.95, 0.72, 0.85), vDaylightFactor);
-    vec3 snowyAlpen   = mix(vec3(0.056, 0.084, 0.132), (STYLE_SELECTION == 0) ? vec3(0.78, 0.86, 0.95) : vec3(0.82, 0.86, 0.98), vDaylightFactor);
-    vec3 aridAmber    = mix(vec3(0.048, 0.068, 0.102), (STYLE_SELECTION == 0) ? vec3(0.92, 0.74, 0.48) : vec3(0.98, 0.76, 0.50), vDaylightFactor);
-    vec3 swampCeladon = mix(vec3(0.036, 0.060, 0.078), (STYLE_SELECTION == 0) ? vec3(0.46, 0.58, 0.46) : vec3(0.44, 0.60, 0.48), vDaylightFactor);
+    // (Removed raw skyColor/fogColor ratio multiplier to prevent red flickers & forest greening)
 
-    float nightBiomeScale = mix(0.18, 1.0, vDaylightFactor) * (1.0 - wetnessFactor * 0.50);
-    float biomeFade = mix(0.28, 1.0, dayBiomeGate) * (1.0 - wetnessFactor * 0.55);
-    horizonCol = mix(horizonCol, bambooJade,   bambooWeight   * 0.62 * biomeFade);
-    horizonCol = mix(horizonCol, mountainGray, mountainWeight * 0.48 * biomeFade);
-    horizonCol = mix(horizonCol, cherryRose,   cherryWeight   * 0.58 * biomeFade);
-    horizonCol = mix(horizonCol, snowyAlpen,   snowyWeight    * 0.62 * biomeFade);
-    horizonCol = mix(horizonCol, aridAmber,    aridWeight     * 0.65 * biomeFade);
-    horizonCol = mix(horizonCol, swampCeladon, swampWeight    * 0.60 * biomeFade);
+    // Full-Dome Biome Skybox Palette Replacement:
+    // Each biome genuinely transforms the entire sky dome (horizonCol, midCol, AND zenithCol)
+    // into its own distinct color palette across clear, rain, and storm weather.
+    float biomeWeatherKeep = 1.0 - wetnessFactor * 0.25;
+    float skyRainDim       = mix(1.0, 0.56, wetnessFactor) * mix(1.0, 0.72, stormFactor);
+    float biomeDomeStrength = mix(0.32, 1.0, smoothstep(0.05, 0.65, vDaylightFactor)) * biomeWeatherKeep;
 
-    // Distinct mid-sky and zenith biome shift so the entire atmospheric dome reflects the current biome
-    midCol = mix(midCol, bambooJade   * 0.84, bambooWeight   * 0.42 * biomeFade);
-    midCol = mix(midCol, mountainGray * 0.85, mountainWeight * 0.32 * biomeFade);
-    midCol = mix(midCol, cherryRose   * 0.86, cherryWeight   * 0.40 * biomeFade);
-    midCol = mix(midCol, snowyAlpen   * 0.84, snowyWeight    * 0.42 * biomeFade);
-    midCol = mix(midCol, aridAmber    * 0.86, aridWeight     * 0.45 * biomeFade);
-    midCol = mix(midCol, swampCeladon * 0.80, swampWeight    * 0.42 * biomeFade);
+    // 1. Bamboo / Jungle: Lush tropical emerald-jade dome (Green > Blue across horizon, mid, and zenith)
+    if (bambooWeight > 0.001) {
+        vec3 bamHor = mix(vec3(0.042, 0.088, 0.072), ((STYLE_SELECTION == 0) ? vec3(0.48, 0.78, 0.58) : vec3(0.40, 0.82, 0.62)) * skyRainDim, vDaylightFactor);
+        vec3 bamMid = mix(vec3(0.030, 0.068, 0.058), ((STYLE_SELECTION == 0) ? vec3(0.28, 0.62, 0.46) : vec3(0.22, 0.66, 0.50)) * skyRainDim, vDaylightFactor);
+        vec3 bamZen = mix(vec3(0.020, 0.048, 0.044), ((STYLE_SELECTION == 0) ? vec3(0.16, 0.44, 0.32) : vec3(0.12, 0.46, 0.36)) * skyRainDim, vDaylightFactor);
+        horizonCol = mix(horizonCol, bamHor, bambooWeight * 0.88 * biomeDomeStrength);
+        midCol     = mix(midCol,     bamMid, bambooWeight * 0.86 * biomeDomeStrength);
+        zenithCol  = mix(zenithCol,  bamZen, bambooWeight * 0.84 * biomeDomeStrength);
+    }
 
-    zenithCol = mix(zenithCol, vec3(0.14, 0.48, 0.62) * nightBiomeScale, bambooWeight * 0.32 * biomeFade);
-    zenithCol = mix(zenithCol, vec3(0.32, 0.42, 0.72) * nightBiomeScale, cherryWeight * 0.30 * biomeFade);
-    zenithCol = mix(zenithCol, vec3(0.18, 0.38, 0.78) * nightBiomeScale, snowyWeight  * 0.34 * biomeFade);
-    zenithCol = mix(zenithCol, vec3(0.28, 0.52, 0.68) * nightBiomeScale, aridWeight   * 0.34 * biomeFade);
-    zenithCol = mix(zenithCol, vec3(0.18, 0.36, 0.40) * nightBiomeScale, swampWeight  * 0.36 * biomeFade);
+    // 2. Mountain / Windswept: Crisp high-altitude slate-silver dome
+    if (mountainWeight > 0.001) {
+        vec3 mtnHor = mix(vec3(0.058, 0.072, 0.096), ((STYLE_SELECTION == 0) ? vec3(0.70, 0.76, 0.78) : vec3(0.66, 0.74, 0.82)) * skyRainDim, vDaylightFactor);
+        vec3 mtnMid = mix(vec3(0.044, 0.056, 0.078), ((STYLE_SELECTION == 0) ? vec3(0.48, 0.56, 0.60) : vec3(0.44, 0.54, 0.66)) * skyRainDim, vDaylightFactor);
+        vec3 mtnZen = mix(vec3(0.032, 0.042, 0.062), ((STYLE_SELECTION == 0) ? vec3(0.30, 0.38, 0.44) : vec3(0.26, 0.36, 0.48)) * skyRainDim, vDaylightFactor);
+        horizonCol = mix(horizonCol, mtnHor, mountainWeight * 0.82 * biomeDomeStrength);
+        midCol     = mix(midCol,     mtnMid, mountainWeight * 0.78 * biomeDomeStrength);
+        zenithCol  = mix(zenithCol,  mtnZen, mountainWeight * 0.75 * biomeDomeStrength);
+    }
+
+    // 3. Cherry Grove: Full sakura rose-plum / blossom-lavender sky dome (no sky-blue upper dome)
+    if (cherryWeight > 0.001) {
+        vec3 chrHor = mix(vec3(0.082, 0.060, 0.096), ((STYLE_SELECTION == 0) ? vec3(0.92, 0.70, 0.78) : vec3(0.95, 0.68, 0.82)) * skyRainDim, vDaylightFactor);
+        vec3 chrMid = mix(vec3(0.062, 0.044, 0.078), ((STYLE_SELECTION == 0) ? vec3(0.74, 0.52, 0.64) : vec3(0.78, 0.50, 0.68)) * skyRainDim, vDaylightFactor);
+        vec3 chrZen = mix(vec3(0.044, 0.030, 0.058), ((STYLE_SELECTION == 0) ? vec3(0.50, 0.34, 0.46) : vec3(0.52, 0.32, 0.50)) * skyRainDim, vDaylightFactor);
+        horizonCol = mix(horizonCol, chrHor, cherryWeight * 0.90 * biomeDomeStrength);
+        midCol     = mix(midCol,     chrMid, cherryWeight * 0.88 * biomeDomeStrength);
+        zenithCol  = mix(zenithCol,  chrZen, cherryWeight * 0.86 * biomeDomeStrength);
+    }
+
+    // 4. Snowy / Glacial: Crisp winter frost-silver & pale periwinkle-ice sky dome
+    if (snowyWeight > 0.001) {
+        vec3 snwHor = mix(vec3(0.068, 0.080, 0.110), ((STYLE_SELECTION == 0) ? vec3(0.84, 0.88, 0.92) : vec3(0.86, 0.88, 0.96)) * skyRainDim, vDaylightFactor);
+        vec3 snwMid = mix(vec3(0.052, 0.062, 0.088), ((STYLE_SELECTION == 0) ? vec3(0.66, 0.72, 0.78) : vec3(0.68, 0.72, 0.84)) * skyRainDim, vDaylightFactor);
+        vec3 snwZen = mix(vec3(0.038, 0.046, 0.068), ((STYLE_SELECTION == 0) ? vec3(0.46, 0.52, 0.60) : vec3(0.46, 0.50, 0.66)) * skyRainDim, vDaylightFactor);
+        horizonCol = mix(horizonCol, snwHor, snowyWeight * 0.88 * biomeDomeStrength);
+        midCol     = mix(midCol,     snwMid, snowyWeight * 0.85 * biomeDomeStrength);
+        zenithCol  = mix(zenithCol,  snwZen, snowyWeight * 0.82 * biomeDomeStrength);
+    }
+
+    // 5. Arid / Desert / Savanna / Badlands: Full desert sand-gold & warm ochre sky dome (R > G > B everywhere)
+    if (aridWeight > 0.001) {
+        vec3 ardHor = mix(vec3(0.078, 0.064, 0.048), ((STYLE_SELECTION == 0) ? vec3(0.92, 0.74, 0.46) : vec3(0.96, 0.76, 0.48)) * skyRainDim, vDaylightFactor);
+        vec3 ardMid = mix(vec3(0.058, 0.048, 0.036), ((STYLE_SELECTION == 0) ? vec3(0.74, 0.58, 0.36) : vec3(0.78, 0.60, 0.38)) * skyRainDim, vDaylightFactor);
+        vec3 ardZen = mix(vec3(0.042, 0.034, 0.026), ((STYLE_SELECTION == 0) ? vec3(0.50, 0.40, 0.26) : vec3(0.52, 0.42, 0.28)) * skyRainDim, vDaylightFactor);
+        horizonCol = mix(horizonCol, ardHor, aridWeight * 0.90 * biomeDomeStrength);
+        midCol     = mix(midCol,     ardMid, aridWeight * 0.88 * biomeDomeStrength);
+        zenithCol  = mix(zenithCol,  ardZen, aridWeight * 0.86 * biomeDomeStrength);
+    }
+
+    // 6. Swamp & Mangrove Swamp: Full murky willow-moss / peat-olive sky dome (Green & Olive > Blue from horizon to zenith!)
+    if (swampWeight > 0.001) {
+        vec3 swpHor = mix(vec3(0.044, 0.064, 0.042), ((STYLE_SELECTION == 0) ? vec3(0.48, 0.56, 0.36) : vec3(0.46, 0.58, 0.38)) * skyRainDim, vDaylightFactor);
+        vec3 swpMid = mix(vec3(0.032, 0.048, 0.030), ((STYLE_SELECTION == 0) ? vec3(0.34, 0.42, 0.26) : vec3(0.32, 0.44, 0.28)) * skyRainDim, vDaylightFactor);
+        vec3 swpZen = mix(vec3(0.022, 0.034, 0.020), ((STYLE_SELECTION == 0) ? vec3(0.20, 0.28, 0.16) : vec3(0.18, 0.30, 0.18)) * skyRainDim, vDaylightFactor);
+        horizonCol = mix(horizonCol, swpHor, swampWeight * 0.92 * biomeDomeStrength);
+        midCol     = mix(midCol,     swpMid, swampWeight * 0.90 * biomeDomeStrength);
+        zenithCol  = mix(zenithCol,  swpZen, swampWeight * 0.88 * biomeDomeStrength);
+    }
+
+    // 7. Pale Garden: Full desaturated ashen pewter-slate dome at all hours (including sunrise/moonrise/sunset)
+    float paleGardenW = evaluatePaleGardenWeight();
+    if (paleGardenW > 0.001) {
+        vec3 paleDayHor = mix(vec3(0.46, 0.44, 0.42), vec3(0.50, 0.45, 0.41), vSunsetFactor * 0.45);
+        vec3 paleDayMid = mix(vec3(0.36, 0.35, 0.34), vec3(0.39, 0.36, 0.34), vSunsetFactor * 0.40);
+        vec3 paleDayZen = mix(vec3(0.26, 0.26, 0.27), vec3(0.28, 0.26, 0.26), vSunsetFactor * 0.35);
+        vec3 paleHorizon = mix(vec3(0.088, 0.088, 0.092), paleDayHor, vDaylightFactor);
+        vec3 paleMid     = mix(vec3(0.068, 0.068, 0.072), paleDayMid, vDaylightFactor);
+        vec3 paleZenith  = mix(vec3(0.048, 0.048, 0.052), paleDayZen, vDaylightFactor);
+        horizonCol = mix(horizonCol, paleHorizon, paleGardenW * 0.98);
+        midCol     = mix(midCol,     paleMid,     paleGardenW * 0.98);
+        zenithCol  = mix(zenithCol,  paleZenith,  paleGardenW * 0.98);
+    }
 
     // Extend the continuous sky dome gradient smoothly down to VdotU = -0.18 so elevated cameras
     // looking down toward distant ocean/terrain horizons never see a flat horizontal cutoff line at VdotU = 0.0!
     float upFactor = clamp(VdotU, 0.0, 1.0);
     float skyElev  = clamp((VdotU + 0.18) / 1.18, 0.0, 1.0);
     float midCurve = pow(1.0 - skyElev, 2.2);
+    float subH = clamp((-VdotU - 0.08) * 1.45, 0.0, 1.0) * (1.0 - paleGardenW * 0.96);
     float horCurve = (VdotU >= -0.08)
         ? pow(1.0 - clamp((VdotU + 0.08) / 0.86, 0.0, 1.0), 2.8)
-        : pow(1.0 - clamp((-VdotU - 0.08) * 1.45, 0.0, 1.0), 2.0);
+        : pow(1.0 - subH, 2.0);
 
     vec3 sky = mix(zenithCol, midCol, midCurve);
     sky = mix(sky, horizonCol, horCurve);
 
     if (VdotU < -0.08) {
-        float subHorizonHold = (1.0 - smoothstep(-0.52, -0.08, VdotU));
+        float subHorizonHold = (1.0 - smoothstep(-0.52, -0.08, VdotU)) * (1.0 - paleGardenW * 0.96);
         vec3 nadirMist = mix(horizonCol * 0.88 + midCol * 0.14, horizonCol * 0.92, vDaylightFactor);
         sky = mix(horizonCol, nadirMist, subHorizonHold);
     }
 
     vec2 rayXZ = worldRayDir.xz / max(length(worldRayDir.xz), 0.001);
     vec2 sunXZ = vSunWorldDir.xz / max(length(vSunWorldDir.xz), 0.001);
-    float sunsetSide = pow(max(dot(rayXZ, sunXZ), 0.0), 2.0);
-    float duskBand = exp(-pow((VdotU + 0.02) * 5.2, 2.0)) * sunsetSide;
+    float sunsetSide = pow(max(dot(rayXZ, sunXZ), 0.0), 1.6);
+    float biomeDuskDamp = 1.0 - max(paleGardenW * 0.96, max(swampWeight * 0.70, cherryWeight * 0.55));
+    float duskBand = exp(-pow((VdotU + 0.02) * 2.2, 2.0)) * sunsetSide * biomeDuskDamp;
     vec3 duskHorizon = (STYLE_SELECTION == 0) ? vec3(0.62, 0.29, 0.15) : vec3(0.72, 0.30, 0.21);
-    sky = mix(sky, duskHorizon, twilightAfterglow() * duskBand * (1.0 - wetnessFactor * 0.85) * 0.48);
+    sky = mix(sky, duskHorizon, twilightAfterglow() * duskBand * (1.0 - wetnessFactor * 0.85) * 0.36);
 
     float rayHorizonGate = smoothstep(-0.26, 0.04, VdotU);
     float sunElevGate    = smoothstep(-0.24, 0.08, vSunWorldDir.y) * rayHorizonGate;
@@ -549,12 +674,16 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
 
     float sunGlare  = pow(clamp(VdotS, 0.0, 1.0), (STYLE_SELECTION == 0 ? 18.0 : 14.0)) * (STYLE_SELECTION == 0 ? 0.15 : 0.18) * sunElevGate;
     float moonGlare = pow(clamp(VdotM, 0.0, 1.0), 14.0) * 0.12 * moonElevGate;
+    vec3 skyChromaGlare = clamp(sky / max(dot(sky, vec3(0.2126, 0.7152, 0.0722)), 0.045), vec3(0.55), vec3(1.45));
+    float glareBiomeW   = clamp(max(max(max(bambooWeight, mountainWeight), max(cherryWeight, snowyWeight)), max(aridWeight, swampWeight)), 0.0, 1.0);
     vec3 sunGlareCol = (STYLE_SELECTION == 0)
         ? mix(vec3(0.98, 0.76, 0.42), vec3(1.04, 0.50, 0.24), vSunsetFactor)
         : mix(vec3(1.00, 0.85, 0.58), vec3(1.10, 0.58, 0.30), vSunsetFactor);
-    vec3 moonGlareCol = (STYLE_SELECTION == 0) ? vec3(0.48, 0.62, 0.62) : vec3(0.42, 0.64, 0.88);
+    sunGlareCol = mix(sunGlareCol, sunGlareCol * skyChromaGlare, glareBiomeW * 0.72);
+    vec3 moonGlareCol = (STYLE_SELECTION == 0) ? vec3(0.58, 0.66, 0.58) : vec3(0.42, 0.64, 0.88);
+    moonGlareCol = mix(moonGlareCol, moonGlareCol * skyChromaGlare, glareBiomeW * 0.70);
 
-    float clearSkyGlare = (1.0 - wetnessFactor * 0.85) * (1.0 - stormFactor * 0.85);
+    float clearSkyGlare = pow(clamp(1.0 - wetnessFactor * 0.98, 0.0, 1.0), 2.0) * (1.0 - stormFactor * 0.98) * (1.0 - paleGardenW * 0.94);
     sky += (sunGlareCol * sunGlare + moonGlareCol * moonGlare) * clearSkyGlare;
 
     if (lightningFlash > 0.001) {
@@ -562,19 +691,32 @@ vec3 evaluateUnifiedSky(vec3 worldRayDir, vec3 viewRayDir) {
         vec3 flashSkyCol = (STYLE_SELECTION == 0) ? vec3(0.48, 0.60, 0.68) : vec3(0.46, 0.62, 0.88);
         sky += flashSkyCol * (lightningFlash * dirBoost * (0.22 + 0.24 * (1.0 - upFactor * 0.5)));
     }
+    if (inTheEnd > 0.001) {
+        sky = mix(sky, evaluateYunMengEndBaseSky(worldRayDir), clamp(inTheEnd, 0.0, 1.0));
+    }
     return sky;
 }
 
 float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
     float wetnessFactor, stormFactor, lightningFlash;
     evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
-    float overcastTrans = (1.0 - wetnessFactor * 0.92) * (1.0 - stormFactor * 0.90);
+    float overcastTrans = pow(clamp(1.0 - wetnessFactor * 0.98, 0.0, 1.0), 2.2) * (1.0 - stormFactor * 0.98);
     if (overcastTrans <= 0.002) return 0.0;
+
+    // Evaluate active biome weights & Pale Garden state so Sun & Moon harmonize naturally with every biome skybox
+    float bBam, bMtn, bChr, bSnw, bArd, bSwp;
+    evaluateSmoothBiomeWeights(bBam, bMtn, bChr, bSnw, bArd, bSwp);
+    float bPale = evaluatePaleGardenWeight();
+    float biomeAtmWeight = clamp(max(max(max(bBam, bMtn), max(bChr, bSnw)), max(max(bArd, bSwp), bPale)), 0.0, 1.0);
+
+    vec3 bgSky       = max(skyRadiance, vec3(0.001));
+    float bgLuma     = dot(bgSky, vec3(0.2126, 0.7152, 0.0722));
+    vec3 skyChroma   = clamp(bgSky / max(bgLuma, 0.045), vec3(0.55), vec3(1.45));
 
     // Shared size control with per-style fitting for the detailed artwork.
     const float sunStyleScale = 1.10;
     float sunAngularScale  = 0.082 * SUN_SIZE * sunStyleScale;
-    float moonAngularScale = 0.080 * SUN_SIZE;
+    float moonAngularScale = 0.088 * SUN_SIZE;
     float celestialDiscMask = 0.0;
 
     // Never slice the Sun or Moon in mid-air at worldRayDir.y = 0.0!
@@ -583,9 +725,10 @@ float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
     float rayHorizonVis  = smoothstep(-0.36, -0.14, worldRayDir.y);
     if (rayHorizonVis <= 0.001) return 0.0;
 
-    float sunHaze = mix(0.78, 1.0, smoothstep(-0.08, 0.16, vSunWorldDir.y));
-    float moonHaze = mix(0.80, 1.0, smoothstep(-0.08, 0.16, vMoonWorldDir.y));
-    float sunHorizonVis = smoothstep(-0.28, -0.10, vSunWorldDir.y) * rayHorizonVis * sunHaze;
+    float sunHaze  = mix(0.72, 1.0, smoothstep(-0.08, 0.22, vSunWorldDir.y));
+    float moonHaze = mix(0.74, 1.0, smoothstep(-0.08, 0.22, vMoonWorldDir.y));
+    float horizonMistVeil = (1.0 - smoothstep(-0.04, 0.24, worldRayDir.y)) * (0.28 + 0.24 * biomeAtmWeight + 0.26 * bPale);
+    float sunHorizonVis  = smoothstep(-0.28, -0.10, vSunWorldDir.y) * rayHorizonVis * sunHaze;
     float moonHorizonVis = smoothstep(-0.28, -0.10, vMoonWorldDir.y) * rayHorizonVis * moonHaze;
 
     float cosSun = dot(worldRayDir, vSunWorldDir);
@@ -605,13 +748,22 @@ float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
                         * sin(sunUV.y * 4.4 - sunUV.x * 1.8 - frameTimeCounter * 0.09);
         float coronaRadius = rSun + solarFlow * 0.025;
         float coronaDistance = max(coronaRadius - 0.99, 0.0);
-        float outerCorona = (exp(-coronaDistance * coronaDistance * 10.0) * 0.30
-            + exp(-coronaDistance * 2.0) * 0.07)
+        float outerCorona = (exp(-coronaDistance * coronaDistance * 10.0) * 0.28
+            + exp(-coronaDistance * 2.0) * 0.065)
             * (1.0 - smoothstep(1.2, 2.8, rSun))
-            * (0.96 + 0.04 * solarFlow) * sunHorizonVis;
-        vec3 coronaColor  = (STYLE_SELECTION == 0)
+            * (0.96 + 0.04 * solarFlow) * sunHorizonVis * (1.0 - bPale * 0.55);
+
+        vec3 baseCorona = (STYLE_SELECTION == 0)
             ? mix(vec3(0.98, 0.72, 0.38), vec3(1.02, 0.48, 0.22), vSunsetFactor)
             : mix(vec3(1.02, 0.82, 0.46), vec3(1.08, 0.56, 0.26), vSunsetFactor);
+
+        // Harmonize corona with active biome skybox so it never clashes against Swamp, Jungle, Cherry, Snowy, or Pale Garden skies
+        vec3 biomeCoronaTarget = baseCorona * mix(vec3(1.0), skyChroma, 0.65);
+        vec3 coronaColor = mix(baseCorona, biomeCoronaTarget, biomeAtmWeight * 0.78);
+        if (bPale > 0.001) {
+            float cLum = dot(coronaColor, vec3(0.2126, 0.7152, 0.0722));
+            coronaColor = mix(coronaColor, vec3(cLum) * vec3(1.02, 0.98, 0.94), bPale * 0.82);
+        }
         skyRadiance += coronaColor * outerCorona * overcastTrans;
 
         if (rSun < 2.0) {
@@ -634,23 +786,29 @@ float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
 
                 if (sunAlpha > 0.001) {
                     vec3 sunArtwork = texSun.rgb;
-                    if (STYLE_SELECTION == 0) {
-                        vec3 sunsetTint = mix(vec3(1.0), vec3(1.12, 0.58, 0.36), vSunsetFactor);
-                        sunArtwork *= sunsetTint;
+                    vec3 sunsetTint = (STYLE_SELECTION == 0)
+                        ? mix(vec3(1.0), vec3(1.12, 0.58, 0.36), vSunsetFactor)
+                        : mix(vec3(1.0), vec3(1.14, 0.64, 0.38), vSunsetFactor);
+                    sunArtwork *= sunsetTint;
 
-                        float discBleed = exp(-max(rSun - 0.44, 0.0) * 3.2) * 0.20;
-                        vec3 bleedColor = mix(vec3(0.98, 0.74, 0.40), vec3(1.04, 0.50, 0.24), vSunsetFactor);
-                        skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
-                        skyRadiance += bleedColor * discBleed * sunAlpha * (1.0 - texSun.a) * (0.96 + solarFlow * 0.04);
-                    } else {
-                        vec3 solarBrilliance = mix(vec3(1.0), vec3(1.14, 0.64, 0.38), vSunsetFactor);
-                        sunArtwork *= solarBrilliance;
+                    // Biome-adaptive atmospheric transmittance & edge integration on the Sun disc:
+                    // Preserves the crisp painted center while seating the disc & rim naturally into the biome sky
+                    float sunRimFactor = smoothstep(0.52, 0.98, rSun);
+                    vec3 biomeSunFilter = mix(vec3(1.0), skyChroma, (0.24 + 0.28 * sunRimFactor) * biomeAtmWeight);
+                    sunArtwork *= biomeSunFilter;
 
-                        float solarBloom = exp(-max(rSun - 0.46, 0.0) * 3.3) * 0.18;
-                        vec3 bloomColor  = mix(vec3(1.00, 0.80, 0.44), vec3(1.10, 0.58, 0.26), vSunsetFactor);
-                        skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
-                        skyRadiance += bloomColor * solarBloom * sunAlpha * (1.0 - texSun.a) * (0.96 + solarFlow * 0.04);
+                    if (bPale > 0.001) {
+                        float sLum = dot(sunArtwork, vec3(0.2126, 0.7152, 0.0722));
+                        sunArtwork = mix(sunArtwork, vec3(sLum) * vec3(1.04, 0.99, 0.93), bPale * 0.72);
                     }
+
+                    // Atmospheric veil ("inscatter") from the local sky dome across low-horizon & misty biomes
+                    float atmInscatter = clamp(horizonMistVeil + (0.10 + 0.16 * sunRimFactor) * (biomeAtmWeight * 0.75 + wetnessFactor * 0.65), 0.0, 0.58);
+                    sunArtwork = mix(sunArtwork, max(bgSky * 1.18, sunArtwork * 0.82), atmInscatter);
+
+                    float discBleed = exp(-max(rSun - 0.45, 0.0) * 3.2) * (STYLE_SELECTION == 0 ? 0.18 : 0.16);
+                    skyRadiance = mix(skyRadiance, sunArtwork, sunAlpha);
+                    skyRadiance += coronaColor * discBleed * sunAlpha * (1.0 - texSun.a) * (0.96 + solarFlow * 0.04);
 
                     celestialDiscMask = max(celestialDiscMask, clamp(sunAlpha * 1.15 * (1.0 - wetnessFactor * 0.95), 0.0, 1.0));
                 }
@@ -674,29 +832,65 @@ float applyTexturedCelestialBodies(inout vec3 skyRadiance, vec3 worldRayDir) {
         float dirBias        = 1.0 + 0.28 * phaseDirX * clamp(moonUV.x / max(rMoon, 0.25), -1.0, 1.0);
 
         float wideLunarAura = exp(-rMoon * 1.35) * (1.0 - smoothstep(1.0, 2.8, rMoon)) * 0.10;
-        float limbDiffusion = exp(-max(rMoon - 0.98, 0.0) * 6.0) * (1.0 - smoothstep(1.0, 2.0, rMoon)) * 0.12;
-        float totalHalo = (wideLunarAura + limbDiffusion) * mix(0.18, 1.0, phaseIllumFrac)
+        float limbDiffusion = exp(-max(rMoon - 0.94, 0.0) * 5.5) * (1.0 - smoothstep(1.0, 2.1, rMoon)) * 0.13;
+        float totalHalo = (wideLunarAura + limbDiffusion) * mix(0.22, 1.0, phaseIllumFrac)
             * dirBias * moonHorizonVis * overcastTrans;
 
-        vec3 haloTint = (STYLE_SELECTION == 0)
-            ? vec3(0.56, 0.72, 0.70)
+        // Warm Xuan-jade / silk-amber lunar halo for the updated Guofeng Moon; spirit-cyan for Xianxia
+        vec3 baseHaloTint = (STYLE_SELECTION == 0)
+            ? mix(vec3(0.64, 0.72, 0.64), vec3(0.82, 0.76, 0.58), 0.45)
             : vec3(0.46, 0.76, 0.92);
+        vec3 haloTint = mix(baseHaloTint, baseHaloTint * mix(vec3(1.0), skyChroma, 0.65), biomeAtmWeight * 0.75);
+        if (bPale > 0.001) {
+            float hLum = dot(haloTint, vec3(0.2126, 0.7152, 0.0722));
+            haloTint = mix(haloTint, vec3(hLum) * vec3(1.0, 1.0, 1.02), bPale * 0.82);
+        }
         skyRadiance += haloTint * totalHalo;
 
-        // The temporary atlas uses Minecraft's eight phases in a 4-by-2 grid.
-        vec2 localUV = moonUV * (30.0 / 64.0) + 0.5;
+        // Sample the 4x2 eight-phase moon atlas using dynamic textureSize so the 2048x1024 Guofeng Moon
+        // (with its lower-left/right cloud scrollwork) and 256x128 Xianxia Moon both sample at 100% native resolution
+        float moonUVScale = (STYLE_SELECTION == 0) ? 0.365 : (30.0 / 64.0);
+        vec2 localUV = moonUV * moonUVScale + 0.5;
         localUV.y = 1.0 - localUV.y;
         if (all(greaterThanEqual(localUV, vec2(0.0))) && all(lessThan(localUV, vec2(1.0)))) {
-            const int cellSize = 64;
+            ivec2 texDims = (STYLE_SELECTION == 0) ? textureSize(guofengMoonTex, 0) : textureSize(xianxiaMoonTex, 0);
+            ivec2 cellDims = texDims / ivec2(4, 2);
             ivec2 cell = ivec2(mPhase & 3, mPhase >> 2);
-            ivec2 pixel = cell * cellSize + ivec2(localUV * float(cellSize));
+            ivec2 pixel = cell * cellDims + clamp(ivec2(localUV * vec2(cellDims)), ivec2(0), cellDims - ivec2(1));
             vec4 moon = (STYLE_SELECTION == 0) ? texelFetch(guofengMoonTex, pixel, 0)
                                               : texelFetch(xianxiaMoonTex, pixel, 0);
             float opacity = moon.a * moonHorizonVis * overcastTrans;
-            skyRadiance = mix(skyRadiance, moon.rgb, opacity);
-            celestialDiscMask = max(celestialDiscMask, opacity);
-        }
+            if (opacity > 0.001) {
+                vec3 moonArtwork = moon.rgb;
+                float moonLum = dot(moonArtwork, vec3(0.2126, 0.7152, 0.0722));
 
+                // Darker pixels (the painted teal cloud motif, crater basins, and earthshine limb) absorb more
+                // of the surrounding night/twilight/biome sky medium so the moon looks embedded in the atmosphere,
+                // while the warm cream moonlit face stays crisp and luminous.
+                float darkFeatureFactor = 1.0 - smoothstep(0.32, 0.78, moonLum);
+                float moonRimFactor     = smoothstep(0.65, 1.08, rMoon);
+
+                vec3 biomeMoonFilter = mix(vec3(1.0), skyChroma, (0.18 + 0.22 * moonRimFactor) * biomeAtmWeight);
+                moonArtwork *= biomeMoonFilter;
+
+                if (bPale > 0.001) {
+                    moonArtwork = mix(moonArtwork, vec3(moonLum) * vec3(1.02, 1.00, 0.98), bPale * 0.65);
+                }
+
+                // Daylight/twilight & horizon atmospheric inscatter: during day/dawn/dusk or near misty horizons,
+                // the sky medium gently veils the shadowed features and blends the disc into the sky dome
+                float daySkyVeil  = vDaylightFactor * (0.28 + 0.44 * darkFeatureFactor);
+                float atmMoonVeil = clamp(daySkyVeil + horizonMistVeil * 0.85 + darkFeatureFactor * 0.16 + moonRimFactor * 0.12 * biomeAtmWeight, 0.0, 0.74);
+                vec3 skySeatTarget = max(bgSky * 1.08, moonArtwork * 0.78);
+                moonArtwork = mix(moonArtwork, skySeatTarget, atmMoonVeil);
+
+                // Soft warm lunar bloom around the painted disc & cloud scrolls
+                float moonBloom = exp(-max(rMoon - 0.55, 0.0) * 3.4) * 0.14 * mix(0.25, 1.0, phaseIllumFrac);
+                skyRadiance = mix(skyRadiance, moonArtwork, opacity);
+                skyRadiance += haloTint * moonBloom * opacity;
+                celestialDiscMask = max(celestialDiscMask, opacity);
+            }
+        }
     }
 
     return celestialDiscMask;
@@ -780,7 +974,7 @@ vec4 renderYunMengVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPo
     // Never fade out horizontal or downward rays when flying near, inside, or above the cloud layer!
     float localOverheadTop = maxTopAlt - 12.0;
     float nearOrAboveLayer = smoothstep(baseAlt - 42.0, baseAlt - 2.0, camPos.y);
-    float belowGrazing     = smoothstep(-0.015, 0.045, cloudRayDir.y);
+    float belowGrazing     = smoothstep(0.012, 0.105, cloudRayDir.y);
     float grazingFade      = mix(belowGrazing, 1.0, nearOrAboveLayer);
 
     #if CLOUD_QUALITY == 0
@@ -834,10 +1028,19 @@ vec4 renderYunMengVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPo
 
     float hgForward = henyeyGreensteinPhase(cosLight, 0.65) * 1.40;
     float hgBack    = henyeyGreensteinPhase(cosLight, -0.25) * 0.45;
-    float phaseFunction = (hgForward + hgBack) * directSourceVis * (1.0 - wetnessFactor * 0.60);
+    float phaseFunction = (hgForward + hgBack) * directSourceVis * pow(clamp(1.0 - wetnessFactor * 0.96, 0.0, 1.0), 2.0) * (1.0 - stormFactor * 0.96);
 
     vec3 cDeepFold, cMidFold, cWarmMid, cSunCrest, silverRimColor;
     getLuminousCloudPalette(cDeepFold, cMidFold, cWarmMid, cSunCrest, silverRimColor);
+
+    // Seat cloud palette into the local sky medium (bgSkyColor) so clouds naturally belong to any biome or weather skybox:
+    float bgLum = dot(bgSkyColor, vec3(0.2126, 0.7152, 0.0722));
+    vec3 bgNorm = bgSkyColor / max(bgLum, 0.035);
+    vec3 skyTintRatio = clamp(mix(vec3(1.0), bgNorm, 0.42 + 0.28 * wetnessFactor), vec3(0.62), vec3(1.38));
+    cDeepFold  = mix(cDeepFold  * skyTintRatio, bgSkyColor * 0.64, 0.34 + 0.24 * wetnessFactor);
+    cMidFold   = mix(cMidFold   * skyTintRatio, bgSkyColor * 0.90, 0.26 + 0.22 * wetnessFactor);
+    cWarmMid   = mix(cWarmMid   * mix(vec3(1.0), skyTintRatio, 0.75), bgSkyColor * 1.12, 0.18 + 0.20 * wetnessFactor);
+    cSunCrest  = mix(cSunCrest  * mix(vec3(1.0), skyTintRatio, 0.55), bgSkyColor * 1.26, 0.12 + 0.18 * wetnessFactor);
 
     float absRayY = abs(cloudRayDir.y);
     float verticalOpticalProjection = mix(max(absRayY, 0.10), 1.0, 0.16);
@@ -964,24 +1167,27 @@ vec4 renderYunMengVolumetricClouds(vec3 rayDirWorld, vec3 viewRayDir, vec3 camPo
             colorSample = mix(colorSample, cSunCrest, t3);
             #endif
 
-            float baseBounce = (1.0 - smoothstep(0.0, 0.22, localHeightNorm)) * 0.10 * (1.0 - topDownView * 0.8);
-            colorSample = mix(colorSample, bgSkyColor * 1.03, baseBounce);
+            // Embed cloud undersides & thin edges into the surrounding sky medium (bgSkyColor)
+            float baseBounce = (1.0 - smoothstep(0.0, 0.38, localHeightNorm)) * (0.28 + 0.22 * wetnessFactor) * (1.0 - topDownView * 0.75);
+            float edgeSeat   = (1.0 - smoothstep(0.05, 0.65, cloudDensity)) * (0.22 + 0.18 * wetnessFactor);
+            colorSample = mix(colorSample, bgSkyColor * 1.02, clamp(baseBounce + edgeSeat, 0.0, 0.58));
 
             float thinTrans = exp(-shadowOD * 1.45);
             float rimMask = celestialDiscMask * (1.0 - celestialDiscMask) * 3.5;
-            float silverBoost = (phaseFunction + rimMask * (1.0 - wetnessFactor)) * thinTrans;
+            float wetRimBreak = (1.0 - smoothstep(0.18, 0.72, cloudDensity)) * smoothstep(0.0, 0.90, cosLight) * wetnessFactor * 0.72;
+            float silverBoost = (phaseFunction + rimMask * (1.0 - wetnessFactor) + wetRimBreak) * thinTrans;
             float rimScale = (activeCloudMode == 1) ? 0.28 : 0.42;
             colorSample += silverRimColor * clamp(silverBoost * rimScale, 0.0, 0.65);
 
             applyCelestialCloudGlow(rayDirWorld, thinTrans, colorSample);
 
-            // Seamless Horizon Mist Extinction:
-            // Blend distant clouds 96% into bgSkyColor near the horizon across day, night, and rain/storm
-            // so the cloud dome melts invisibly into the horizon mist with zero cutoff line!
-            float aerialHaze = 1.0 - exp(-max(distXZ - 200.0, 0.0) * 0.00165);
+            // Seamless Horizon & Atmospheric Extinction:
+            // Starts closer (90m) and stronger in rain/mist so clouds melt smoothly into every biome skybox!
+            float aerialHaze = 1.0 - exp(-max(distXZ - 90.0, 0.0) * mix(0.0022, 0.0034, wetnessFactor));
+            float elevMist   = (1.0 - smoothstep(0.02, 0.28, absRayY)) * (0.32 + 0.24 * wetnessFactor);
             float highSkyAuroraProtect = smoothstep(0.16, 0.36, rayDirWorld.y) * vNightFactor * (1.0 - wetnessFactor);
             float hazeColorBlend = mix(0.96, 0.42, highSkyAuroraProtect);
-            colorSample = mix(colorSample, bgSkyColor, clamp(aerialHaze * hazeColorBlend, 0.0, 0.96));
+            colorSample = mix(colorSample, bgSkyColor, clamp((aerialHaze + elevMist) * hazeColorBlend, 0.0, 0.96));
 
             float distanceEnvelope = (1.0 - smoothstep(maxTraceDist * 0.55, maxTraceDist * 0.98, distXZ))
                                    * (1.0 - aerialHaze * mix(0.45, 0.65, highSkyAuroraProtect));
@@ -1029,14 +1235,46 @@ vec4 computeValleyMistAndBorderFog(vec3 worldPos, vec3 playerPos, float viewDist
     // Anchor valley/path mist to the lower atmospheric horizon band so elevated hilltops and cherry trees
     // fade into cohesive valley mist rather than looking see-through against the upper sky dome,
     // while smoothly matching skyAtRay right at the unloaded chunk border.
-    vec3 mistWorldRay = normalize(vec3(worldRayDir.x, clamp(worldRayDir.y * 0.18, 0.01, 0.06), worldRayDir.z));
+    vec3 mistWorldRay = normalize(vec3(worldRayDir.x, clamp(worldRayDir.y * 0.65, -0.02, 0.24), worldRayDir.z));
     vec3 mistViewRay  = normalize(transpose(mat3(gbufferModelViewInverse)) * mistWorldRay);
     vec3 horizonMistColor = evaluateUnifiedSky(mistWorldRay, mistViewRay);
-    vec3 fogColor = mix(horizonMistColor, skyAtRay, smoothstep(0.15, 0.85, borderWeight));
-    return vec4(fogColor, clamp(combinedFog, 0.0, 1.0));
+    if (inTheEnd > 0.001) {
+        // Isotropic abyssal horizon mist color in The End so downward rays (worldRayDir.xz -> 0)
+        // never project the directional sky bloom into a nadir cone under the player!
+        vec3 isotropicEndMist = (STYLE_SELECTION == 0)
+            ? vec3(0.034, 0.056, 0.045)
+            : vec3(0.026, 0.072, 0.076);
+        horizonMistColor = mix(horizonMistColor, isotropicEndMist, clamp(inTheEnd, 0.0, 1.0));
+    }
+    float elevMatch = smoothstep(-0.01, 0.08, worldRayDir.y);
+    float skyMatchW = max(smoothstep(0.08, 0.70, borderWeight),
+                      max(smoothstep(0.22, 0.80, combinedFog),
+                      max(elevMatch * 0.85,
+                      max(vSunsetFactor * 0.85, evaluatePaleGardenWeight() * 0.98))));
+    vec3 finalFogCol = mix(horizonMistColor, skyAtRay, skyMatchW);
+    return vec4(finalFogCol, clamp(combinedFog, 0.0, 1.0));
 }
 
-vec3 applyAtmosphericPrecipitation(vec3 sceneRadiance, vec3 unifiedSky, vec3 worldRayDir) {
+vec3 applyAtmosphericPrecipitation(vec3 sceneRadiance, vec3 unifiedSky, vec3 worldRayDir, float viewDist) {
+    float wetnessFactor, stormFactor, lightningFlash;
+    evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
+
+    // Subtle distant rain-curtain shimmer across far hills & valleys (>16m) so zoomed-in views show drifting rain sheets
+    float distantRainGate = clamp(rainStrength, 0.0, 1.0) * (1.0 - clamp(inSnowyBiome, 0.0, 1.0))
+                          * (1.0 - clamp(inAridBiome, 0.0, 1.0)) * smoothstep(16.0, 42.0, viewDist)
+                          * smoothstep(-0.22, 0.14, worldRayDir.y) * (1.0 - smoothstep(0.35, 0.72, worldRayDir.y));
+    if (distantRainGate > 0.01) {
+        float azim = atan(worldRayDir.z, worldRayDir.x);
+        float slant = (SKY_STYLE == 1) ? 0.03 : 0.12;
+        float sheetU = azim * 18.0 + worldRayDir.y * (18.0 * slant);
+        float sheetV = worldRayDir.y * 8.0 + frameTimeCounter * (2.6 + 1.2 * stormFactor) * max(WIND_SPEED, 0.4);
+        float curtainA = 0.5 + 0.5 * sin(sheetU * 1.35 + sin(sheetV * 0.45) * 0.8);
+        float curtainB = 0.5 + 0.5 * sin(sheetU * 2.90 - frameTimeCounter * 0.35 + sheetV * 0.25);
+        float fineLines = pow(curtainA * 0.55 + curtainB * 0.45, 2.2);
+        vec3 curtainCol = mix(unifiedSky * 1.10, vec3(0.42, 0.49, 0.54) * mix(0.18, 0.88, vDaylightFactor), 0.45);
+        sceneRadiance = mix(sceneRadiance, max(sceneRadiance, curtainCol), fineLines * distantRainGate * (0.09 + 0.06 * stormFactor));
+    }
+
     vec4 weatherSample = texture(colortex3, vTexCoord);
     if (weatherSample.a <= 0.002) return sceneRadiance;
 
@@ -1044,9 +1282,6 @@ vec3 applyAtmosphericPrecipitation(vec3 sceneRadiance, vec3 unifiedSky, vec3 wor
     float streakLuma  = clamp(unpacked.r, 0.40, 1.0);
     float blockLight  = clamp(unpacked.g, 0.0, 1.0);
     float snowWeight  = clamp(unpacked.b, 0.0, 1.0);
-
-    float wetnessFactor, stormFactor, lightningFlash;
-    evaluateWeatherState(wetnessFactor, stormFactor, lightningFlash);
 
     vec3 rainMistTint = (STYLE_SELECTION == 0)
         ? mix(vec3(0.08, 0.13, 0.17), vec3(0.54, 0.62, 0.62), vDaylightFactor)
@@ -1250,11 +1485,15 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta, fl
 
     float beamResponse = 1.0 - exp(-0.65 * litScatter * min(FOG_DENSITY, 1.35));
 
-    // Focused forward Mie phase so crepuscular beams appear selectively around the sun/moon region
-    // through major cloud breaks rather than flooding the entire sky hemisphere!
-    const float forwardLimit = (STYLE_SELECTION == 0) ? 2.5 : 2.8;
-    float forwardMie = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.54) * 11.0, forwardLimit);
-    float phase      = 0.24 + 0.76 * forwardMie;
+    // Smooth Anisotropic Mie Phase:
+    // In clear weather (g = 0.54, cap = 2.5), beams focus cleanly around the sun/moon and through foliage.
+    // In rain/thunder (g = 0.36, cap = 1.15), forward scattering is gently plateaued across the central cone
+    // so crepuscular rays fan out evenly across the sky and valleys with ZERO dark hole and ZERO circular bullseye!
+    float clearMie = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.54) * 11.0, (STYLE_SELECTION == 0) ? 2.5 : 2.8);
+    float wetMie   = min(henyeyGreensteinPhase(clamp(cosTheta, -1.0, 1.0), 0.36) * 4.2, 1.15);
+    float clearPhase = 0.24 + 0.76 * clearMie;
+    float wetPhase   = 0.38 + 0.62 * wetMie;
+    float phase      = mix(clearPhase, wetPhase, wetnessFactor);
 
     float enclosureGain = mix(1.20, 0.80, smoothstep(0.50, 0.95, eyeSkyFactor));
 
@@ -1264,31 +1503,44 @@ vec3 computeVolumetricLightShafts(vec3 viewPos, float depth0, float cosTheta, fl
     float modeScale = (LIGHT_SHAFTS >= 2) ? 1.00 : 0.75;
     float timeScale = mix(0.88, 1.00, vDaylightFactor);
     float nearSurfaceFade = 1.0 - exp(-maxRayDist / 0.45);
-    float exposedGain = mix(0.72, 0.88, wetnessFactor);
+    float exposedGain = mix(0.72, 0.58, wetnessFactor) * mix(1.0, 0.84, stormFactor);
     float structureGain = mix(1.0, exposedGain, smoothstep(0.35, 0.95, eyeSkyFactor));
     float distantOpenAir = smoothstep(12.0, 64.0, fullViewDist)
                          * smoothstep(0.35, 0.95, eyeSkyFactor);
-    float localGain = cloudMode == 3 ? 1.0 : mix(1.0, 0.18, distantOpenAir);
+    float localGain = cloudMode == 3 ? 1.0 : mix(1.0, mix(0.18, 0.08, wetnessFactor), distantOpenAir);
 
     float shaftIntensity = beamResponse * phase * enclosureGain * surfaceContrast *
                            ((STYLE_SELECTION == 0) ? 0.28 : 0.30) * modeScale * ATMOSPHERIC_SHAFT_STRENGTH * structureGain *
                            timeScale * nearSurfaceFade * sourceVisibility * localGain;
 
+    float sBam, sMtn, sChr, sSnw, sArd, sSwp;
+    evaluateSmoothBiomeWeights(sBam, sMtn, sChr, sSnw, sArd, sSwp);
     vec3 clearDayColor = (STYLE_SELECTION == 0)
         ? mix(vec3(1.02, 0.84, 0.56), vec3(1.08, 0.64, 0.38), vSunsetFactor) * 0.88
-        : mix(mix(vec3(1.05, 0.88, 0.60), vec3(0.60, 0.94, 0.80), inBambooJungle * 0.45),
-              vec3(1.12, 0.68, 0.40), vSunsetFactor) * 0.92;
+        : mix(vec3(1.05, 0.88, 0.60), vec3(1.12, 0.68, 0.40), vSunsetFactor) * 0.92;
+    clearDayColor = mix(clearDayColor, vec3(0.62, 0.88, 0.72), sBam * 0.55);
+    clearDayColor = mix(clearDayColor, vec3(0.68, 0.76, 0.54), sSwp * 0.60);
+    clearDayColor = mix(clearDayColor, vec3(0.94, 0.72, 0.82), sChr * 0.55);
+    clearDayColor = mix(clearDayColor, vec3(0.82, 0.88, 0.96), sSnw * 0.55);
+    clearDayColor = mix(clearDayColor, vec3(0.76, 0.82, 0.88), sMtn * 0.48);
+
     vec3 stormDayColor = (STYLE_SELECTION == 0)
-        ? vec3(0.64, 0.82, 0.90) * 0.92
-        : vec3(0.52, 0.82, 1.04) * 0.96;
-    vec3 dayShaftColor = mix(clearDayColor, stormDayColor, wetnessFactor * 0.75);
+        ? vec3(0.62, 0.76, 0.82) * 0.90
+        : vec3(0.54, 0.78, 0.96) * 0.94;
+    stormDayColor = mix(stormDayColor, vec3(0.48, 0.74, 0.62), sBam * 0.55);
+    stormDayColor = mix(stormDayColor, vec3(0.54, 0.62, 0.46), sSwp * 0.60);
+    stormDayColor = mix(stormDayColor, vec3(0.76, 0.60, 0.70), sChr * 0.55);
+    stormDayColor = mix(stormDayColor, vec3(0.72, 0.78, 0.88), sSnw * 0.55);
+
+    vec3 dayShaftColor = mix(clearDayColor, stormDayColor, wetnessFactor * 0.78);
+    dayShaftColor = mix(dayShaftColor, vec3(0.54, 0.52, 0.50), evaluatePaleGardenWeight() * 0.85);
 
     vec3 nightShaftColor = (STYLE_SELECTION == 0)
-        ? vec3(0.52, 0.72, 0.76) * 0.86
+        ? vec3(0.56, 0.68, 0.62) * 0.84
         : vec3(0.48, 0.76, 1.02) * 0.90;
 
-    float wetBeamBoost = mix(0.18, 0.28, wetnessFactor) * mix(1.0, 1.10, stormFactor);
-    float cloudBeam = cloudMode == 3 ? 0.0 : (1.0 - exp(-cloudScatter * 0.88)) * phase
+    float wetBeamBoost = mix(0.20, 0.30, wetnessFactor) * mix(1.0, 0.90, stormFactor);
+    float cloudBeam = cloudMode == 3 ? 0.0 : (1.0 - exp(-cloudScatter * 0.92)) * phase
                     * wetBeamBoost * modeScale * surfaceContrast
                     * timeScale * sourceVisibility * ATMOSPHERIC_SHAFT_STRENGTH;
     vec3 shaftColor = mix(nightShaftColor, dayShaftColor, vDaylightFactor);
@@ -1377,7 +1629,6 @@ vec3 renderSunLensFlare(vec2 uv) {
 
 #ifdef YUNMENG_CLOUD_PREPASS
 
-
 void main() {
     outColor0 = vec4(0.0);
     outWaterEnvironment = vec4(0.0);
@@ -1424,7 +1675,7 @@ void main() {
     vec3 worldPos = (gbufferModelViewInverse * vec4(viewPos, 1.0)).xyz + cameraPosition;
     if (isEyeInWater == 1) {
         bool surface = depth < 0.999999 && abs(texture(colortex1, vTexCoord).a - 0.90) < 0.05;
-        if ((surface || depth >= 0.999999) && texture(depthtex1, vTexCoord).r >= 0.999999 && !isUnderwaterSurfaceCoveredByIce(vTexCoord, worldPos - cameraPosition)) {
+        if ((surface || (depth >= 0.999999 && texture(depthtex1, vTexCoord).r >= 0.999999)) && !isUnderwaterSurfaceCoveredByIce(vTexCoord, worldPos - cameraPosition)) {
             // Refract overhead sky & clouds through the multi-scale trochoidal wave field (waterSurfaceWaves)
             // so the underwater ceiling shares the exact organic wave facets of the surface without sine-band stripes.
             float t = frameTimeCounter * WIND_SPEED;
@@ -1528,8 +1779,9 @@ void main() {
     }
     if (mode == 3) return;
     bool belowLayer = cameraPosition.y < (CLOUD_ALTITUDE - 16.0) && worldPos.y < (CLOUD_ALTITUDE - 16.0);
-    float rawBorder = depth >= 0.999999 ? 1.0 : terrainSkyBlend(worldPos - cameraPosition);
-    // Only allow background horizon clouds at the very last chunk-unloading edge (>88% border fog)
+    float trueFarBorder = smoothstep(far * 0.88, far * 0.98, length((worldPos - cameraPosition).xz)) * (1.0 - evaluatePaleGardenWeight());
+    float rawBorder = depth >= 0.999999 ? 1.0 : min(terrainSkyBlend(worldPos - cameraPosition), trueFarBorder);
+    // Only allow background horizon clouds at the true far chunk-unloading edge (>88% far border, never in Pale Garden mist)
     // so solid mid-ground hills and trees never look see-through with background clouds drawn over them.
     float backgroundBlend = depth >= 0.999999 ? 1.0 : smoothstep(0.88, 0.995, rawBorder);
     if (depth < 0.999999 && belowLayer && backgroundBlend <= 0.001) return;
@@ -1592,17 +1844,59 @@ void main() {
         vec3 uwFogColor;
         float uwFogDensity;
 
+        float bStrengthUW = clamp(BIOME_TINT_STRENGTH, 0.0, 1.5);
+        float wSwampUW    = clamp(inSwampBiome   * bStrengthUW, 0.0, 1.0);
+        float wSnowyUW    = clamp(inSnowyBiome   * bStrengthUW, 0.0, 1.0);
+        float wBambooUW   = clamp(inBambooJungle * bStrengthUW, 0.0, 1.0);
+        float wCherryUW   = clamp(inCherryGrove  * bStrengthUW, 0.0, 1.0);
+        // Detect vanilla water_fog_color murkiness (Swamp #232317 & Mangrove Swamp #4D7A60 have G >= B, whereas default #050533 has B >> G)
+        float vanillaSwampMurk = clamp((fogColor.g - fogColor.b * 0.82) * 4.5, 0.0, 1.0) * min(bStrengthUW, 1.25);
+        float effSwampUW       = max(wSwampUW, vanillaSwampMurk);
+        float fogPeakUW        = max(fogColor.r, max(fogColor.g, fogColor.b));
+        float fogMinUW         = min(fogColor.r, min(fogColor.g, fogColor.b));
+        float paleGardenUW     = (1.0 - smoothstep(0.04, 0.18, (fogPeakUW - fogMinUW) / max(fogPeakUW, 1e-4)))
+                               * smoothstep(0.18, 0.35, fogPeakUW) * min(bStrengthUW, 1.25);
+
         if (STYLE_SELECTION == 0) {
             vec3 deepSumiTeal = vec3(0.10, 0.22, 0.24);
             vec3 upperCeladon = vec3(0.32, 0.52, 0.50);
+            // Swamp / Mangrove Swamp murky Jiangnan tea-moss underwater fog
+            deepSumiTeal = mix(deepSumiTeal, vec3(0.07, 0.13, 0.06), effSwampUW * 0.85);
+            upperCeladon = mix(upperCeladon, vec3(0.22, 0.32, 0.16), effSwampUW * 0.85);
+            // Snowy glacial indigo underwater fog
+            deepSumiTeal = mix(deepSumiTeal, vec3(0.05, 0.12, 0.28), wSnowyUW * 0.65);
+            upperCeladon = mix(upperCeladon, vec3(0.18, 0.34, 0.54), wSnowyUW * 0.65);
+            // Bamboo & Cherry underwater tints
+            upperCeladon = mix(upperCeladon, vec3(0.26, 0.56, 0.46), wBambooUW * 0.45);
+            upperCeladon = mix(upperCeladon, vec3(0.38, 0.48, 0.54), wCherryUW * 0.42);
+            // Pale Garden desaturated slate-ash underwater fog
+            deepSumiTeal = mix(deepSumiTeal, vec3(0.10, 0.11, 0.12), paleGardenUW * 0.85);
+            upperCeladon = mix(upperCeladon, vec3(0.26, 0.28, 0.29), paleGardenUW * 0.85);
             uwFogColor   = mix(deepSumiTeal, upperCeladon, pow(upGradient, 0.85)) * mix(0.22, 1.0, vDaylightFactor);
-            uwFogDensity = 0.052;
         } else {
-            vec3 abyssalSapphire  = vec3(0.015, 0.11, 0.20);
-            vec3 surfaceTurquoise = vec3(0.06, 0.36, 0.46);
-            uwFogColor   = mix(abyssalSapphire, surfaceTurquoise, pow(upGradient, 0.75)) * mix(0.20, 1.0, vDaylightFactor);
-            uwFogDensity = 0.046;
+            vec3 abyssalSapphire  = vec3(0.025, 0.16, 0.26);
+            vec3 surfaceTurquoise = vec3(0.07, 0.38, 0.48);
+            // Swamp / Mangrove Swamp murky olive-emerald underwater fog
+            abyssalSapphire  = mix(abyssalSapphire,  vec3(0.045, 0.12, 0.055), effSwampUW * 0.85);
+            surfaceTurquoise = mix(surfaceTurquoise, vec3(0.17,  0.31, 0.14),  effSwampUW * 0.85);
+            // Snowy glacial cobalt underwater fog
+            abyssalSapphire  = mix(abyssalSapphire,  vec3(0.02, 0.07, 0.28), wSnowyUW * 0.68);
+            surfaceTurquoise = mix(surfaceTurquoise, vec3(0.08, 0.22, 0.56), wSnowyUW * 0.68);
+            // Bamboo & Cherry underwater tints
+            surfaceTurquoise = mix(surfaceTurquoise, vec3(0.10, 0.46, 0.40), wBambooUW * 0.45);
+            surfaceTurquoise = mix(surfaceTurquoise, vec3(0.24, 0.38, 0.50), wCherryUW * 0.42);
+            // Pale Garden desaturated ash underwater fog
+            abyssalSapphire  = mix(abyssalSapphire,  vec3(0.08, 0.09, 0.10), paleGardenUW * 0.85);
+            surfaceTurquoise = mix(surfaceTurquoise, vec3(0.22, 0.24, 0.25), paleGardenUW * 0.85);
+            uwFogColor   = mix(abyssalSapphire, surfaceTurquoise, pow(upGradient, 0.82)) * mix(0.20, 1.0, vDaylightFactor);
         }
+        // Blend subtle vanilla water_fog_color chroma so Warm Oceans and modded biomes shift naturally
+        vec3 linVanillaUwFog = pow(max(fogColor, vec3(0.001)), vec3(2.2));
+        uwFogColor = mix(uwFogColor, linVanillaUwFog * 1.30, 0.24 * min(bStrengthUW, 1.25));
+
+        // Vanilla thickens underwater fog in Swamps & Mangrove Swamps (lowering underwater visibility distance)
+        float vanillaUwPull = (fogEnd > 1.0 && fogEnd < 90.0) ? clamp((90.0 - fogEnd) / 65.0, 0.0, 1.0) : 0.0;
+        uwFogDensity = mix(0.052, 0.108, max(effSwampUW * 0.88, max(paleGardenUW * 0.65, vanillaUwPull * 0.75)));
 
         // Retain diffuse underwater visibility in overcast, while its direct
         // shafts below use the spatially varying incident cloud transmission.
@@ -1611,7 +1905,7 @@ void main() {
         uwFogColor *= mix(1.0, 0.82, uwRain) * mix(1.0, 0.82, uwStorm);
         bool waterSurface = depth0 < 0.999999 && abs(sceneMaterial - 0.90) < 0.05;
         float lateralExit = waterSurface ? texture(colortex2, vTexCoord).a : 0.0;
-        if ((waterSurface || depth0 >= 0.999999) && texture(depthtex1, vTexCoord).r >= 0.999999 && !isUnderwaterSurfaceCoveredByIce(vTexCoord, playerPos)) {
+        if ((waterSurface || (depth0 >= 0.999999 && texture(depthtex1, vTexCoord).r >= 0.999999)) && !isUnderwaterSurfaceCoveredByIce(vTexCoord, playerPos)) {
             vec4 environment = reconstructWaterEnvironment(vTexCoord, viewDist);
             // Continuous underwater ceiling transmission:
             // - Avoids the harsh circular Snell's window cutoff and avoids per-triangle polygon facets on slopes,
@@ -1663,11 +1957,15 @@ void main() {
             finalRadiance = mix(finalRadiance, sheetTint, opacity);
         }
 
-        // Natural underwater depth fog across both terrain and the water ceiling
+        // Natural underwater depth fog across both terrain and the water ceiling,
+        // with Total Internal Reflection (TIR) grazing convergence on the water ceiling so the ceiling edge
+        // blends seamlessly into distant underwater terrain without a horizon step.
         float upLookFogRelief = (1.0 - lateralExit) * smoothstep(0.15, 0.75, max(worldRayDir.y, 0.0)) * 0.32;
+        float baseUwFog = clamp(1.0 - exp(-viewDist * uwFogDensity * (1.0 - upLookFogRelief)), 0.0, 0.96);
+        float ceilingGrazingFog = pow(1.0 - smoothstep(0.02, 0.42, clamp(worldRayDir.y, 0.0, 1.0)), 1.5) * (1.0 - lateralExit);
         float uwFogFactor = (depth0 >= 0.999999)
             ? (0.96 - upLookFogRelief * 0.65)
-            : clamp(1.0 - exp(-viewDist * uwFogDensity * (1.0 - upLookFogRelief)), 0.0, 0.96);
+            : (waterSurface ? mix(baseUwFog, 0.95, ceilingGrazingFog * 0.90) : baseUwFog);
         finalRadiance = mix(finalRadiance * 0.88, uwFogColor, uwFogFactor);
         finalRadiance += computeUnderwaterLightShafts(viewPos, vLightWorldDir, cosTheta);
 
@@ -1683,32 +1981,41 @@ void main() {
 
     vec3 skyAuroraLight = vec3(0.0);
     vec3 celestialArtAndStars = vec3(0.0);
+    float endWeight = clamp(inTheEnd, 0.0, 1.0);
     if (depth0 >= 0.999999) {
-        float sunStarOcc  = smoothstep(0.9945, 0.9975, dot(worldRayDir, vSunWorldDir));
-        float wetnessNow, stormNow, flashNow;
-        evaluateWeatherState(wetnessNow, stormNow, flashNow);
-        // Keep stars visible during twilight/sunset as well as night
-        float starTwilightVis = 1.0 - smoothstep(-0.06, 0.14, vSunWorldDir.y);
-        vec3 starAdd = sceneColor.rgb * starTwilightVis * (1.0 - wetnessNow * 0.96)
-                     * (1.0 - sunStarOcc) * smoothstep(-0.20, -0.02, worldRayDir.y);
-        vec3 skyWithCelestials = unifiedSky + starAdd;
-        celestialDiscMask = applyTexturedCelestialBodies(skyWithCelestials, worldRayDir);
-        celestialArtAndStars = max(skyWithCelestials - unifiedSky, vec3(0.0));
-        if (cameraPosition.y < AURORA_BASE_Y) {
-            skyAuroraLight = renderNightYunMengAurora(worldRayDir, frameTimeCounter, NIGHT_AURORA, 1.0 - celestialDiscMask);
-            skyWithCelestials += skyAuroraLight;
+        vec3 skyWithCelestials = unifiedSky;
+        if (endWeight < 0.999) {
+            float sunStarOcc  = smoothstep(0.9945, 0.9975, dot(worldRayDir, vSunWorldDir));
+            float wetnessNow, stormNow, flashNow;
+            evaluateWeatherState(wetnessNow, stormNow, flashNow);
+            // Keep stars visible during twilight/sunset as well as night
+            float starTwilightVis = (1.0 - smoothstep(-0.09, 0.01, vSunWorldDir.y)) * (1.0 - evaluatePaleGardenWeight() * 0.90);
+            vec3 starAdd = sceneColor.rgb * starTwilightVis * (1.0 - wetnessNow * 0.96)
+                         * (1.0 - sunStarOcc) * smoothstep(-0.20, -0.02, worldRayDir.y);
+            skyWithCelestials += starAdd;
+            celestialDiscMask = applyTexturedCelestialBodies(skyWithCelestials, worldRayDir);
+            celestialArtAndStars = max(skyWithCelestials - unifiedSky, vec3(0.0)) * (1.0 - endWeight);
+            if (cameraPosition.y < AURORA_BASE_Y) {
+                skyAuroraLight = renderNightYunMengAurora(worldRayDir, frameTimeCounter, NIGHT_AURORA, 1.0 - celestialDiscMask) * (1.0 - endWeight);
+                skyWithCelestials += skyAuroraLight;
+            }
+        }
+        if (endWeight > 0.001) {
+            vec3 endSkyDome = renderYunMengEndSkyDome(worldRayDir, viewRayDir, unifiedSky);
+            skyWithCelestials = mix(skyWithCelestials, endSkyDome, endWeight);
         }
         finalRadiance = skyWithCelestials;
     } else {
         vec4 mistAndBorder = computeValleyMistAndBorderFog(worldPos, playerPos, viewDist, unifiedSky, worldRayDir, viewRayDir);
-        // Held items are camera foreground, outside the world fog volume.
+        // Held items are camera foreground, outside the world fog volume; emissive eyes pierce near/mid fog.
         if (abs(sceneMaterial-0.12)<0.007) mistAndBorder.a=0.0;
+        if (sceneMaterial > 0.335 && sceneMaterial < 0.475) mistAndBorder.a *= smoothstep(18.0, 64.0, viewDist) * 0.35;
         horizonFogWeight = mistAndBorder.a;
         finalRadiance = mix(finalRadiance, mistAndBorder.rgb, mistAndBorder.a);
     }
 
     vec3 foregroundAurora = vec3(0.0);
-    if (cameraPosition.y >= AURORA_BASE_Y || depth0 < 0.999999) {
+    if ((cameraPosition.y >= AURORA_BASE_Y || depth0 < 0.999999) && endWeight < 0.99) {
         if (abs(sceneMaterial - 0.12) >= 0.007)
             foregroundAurora = renderWorldAurora(cameraPosition, worldRayDir, frameTimeCounter,
                 NIGHT_AURORA, 1.0, depth0 >= 0.999999 ? 1152.0 : viewDist);
@@ -1719,8 +2026,8 @@ void main() {
     // Soften cloud opacity over the Sun/Moon disc and forward-scatter the Sun/Moon artwork and stars
     // through the clouds so they stay softly visible instead of getting harshly covered up!
     bool needsCloudTrace = (depth0 >= 0.999999) || (cameraPosition.y > CLOUD_ALTITUDE - 16.0) || (worldPos.y > CLOUD_ALTITUDE - 16.0)
-                        || terrainSkyBlend(playerPos) > 0.88;
-    if (activeCloudMode != 3 && needsCloudTrace) {
+                        || (terrainSkyBlend(playerPos) > 0.88 && length(playerPos.xz) > far * 0.88 && evaluatePaleGardenWeight() < 0.5);
+    if (activeCloudMode != 3 && needsCloudTrace && endWeight < 0.99) {
         vec4 volClouds = resolveClouds(depth0, viewDist);
         // True Cloud-In-Front-Of-Celestial Depth Ordering with Thin-Edge Backlit Translucency:
         // Keep full cloud opacity (volClouds.a) so Wuxia Smooth and Voxel clouds clearly pass IN FRONT OF
@@ -1762,17 +2069,21 @@ void main() {
             shaftViewPos = reconstructViewPos(vTexCoord, shaftDepth);
         }
     }
-    if (abs(shaftMaterial - 0.12) >= 0.007) {
-        finalRadiance = applyAtmosphericPrecipitation(finalRadiance, unifiedSky, worldRayDir);
+    if (abs(shaftMaterial - 0.12) >= 0.007 && endWeight < 0.99) {
+        finalRadiance = applyAtmosphericPrecipitation(finalRadiance, unifiedSky, worldRayDir, depth0 >= 0.999999 ? far : viewDist);
     }
     float sceneLuma = dot(finalRadiance, vec3(0.2126, 0.7152, 0.0722));
-    vec3 lightShafts = computeVolumetricLightShafts(shaftViewPos, shaftDepth, cosTheta, sceneLuma, horizonFogWeight);
+    vec3 lightShafts = (endWeight < 0.99)
+        ? computeVolumetricLightShafts(shaftViewPos, shaftDepth, cosTheta, sceneLuma, horizonFogWeight) * (1.0 - endWeight)
+        : vec3(0.0);
     finalRadiance += lightShafts;
 #if LIGHT_SHAFTS > 0
     outAtmosphericShafts = vec4(lightShafts, 0.0);
 #endif
 #if SUN_LENS_FLARE > 0
-    finalRadiance += renderSunLensFlare(vTexCoord);
+    if (endWeight < 0.99) {
+        finalRadiance += renderSunLensFlare(vTexCoord) * (1.0 - endWeight);
+    }
 #endif
 
     outColor0 = vec4(finalRadiance, 1.0);

@@ -70,15 +70,21 @@ void main() {
         vec3 w = evaluateShadowWind(worldPos, frameTimeCounter * 1.25, skyExposure);
         playerPos.xz += w.xz * 0.12;
     } else if (matId == 8105) {
-        vec3 w = evaluateShadowWind(worldPos, frameTimeCounter * 1.25, skyExposure);
-        playerPos.xz += w.xz * (isTopVertex ? 0.22 : 0.12);
+        vec3 w = evaluateShadowWind(worldPos - vec3(0.0, 0.5, 0.0), frameTimeCounter * 1.25, skyExposure);
+        playerPos.xz += w.xz * (isTopVertex ? 0.21 : 0.12);
+    } else if (matId == 8107) {
+        vec3 w = evaluateShadowWind(worldPos, frameTimeCounter * 1.05, max(skyExposure, 0.25));
+        playerPos.xz += w.xz * (isTopVertex ? 0.01 : 0.075);
     }
     #endif
 
     #ifdef WAVING_SUGARCANE
-    if (matId == 8104 && isTopVertex) {
-        vec3 w = evaluateShadowWind(worldPos, frameTimeCounter * 1.25, skyExposure);
-        playerPos.xz += w.xz * 0.12;
+    if (matId == 8104) {
+        vec3 w = evaluateShadowWind(worldPos, frameTimeCounter * 1.15, skyExposure);
+        playerPos.xz += w.xz * (isTopVertex ? 0.085 : 0.038);
+    } else if (matId == 8109 && isTopVertex) {
+        float tFlow = frameTimeCounter * 1.6 * WIND_SPEED;
+        playerPos.xz += vec2(sin(tFlow + worldPos.x * 0.65 + worldPos.y * 0.85), cos(tFlow * 0.85 + worldPos.z * 0.65)) * 0.070;
     }
     #endif
 

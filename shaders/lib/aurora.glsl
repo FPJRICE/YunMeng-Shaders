@@ -18,7 +18,9 @@ vec3 renderWorldAurora(vec3 origin, vec3 ray, float time, int mode, float starVi
     if (mode == 3 || starVisibility <= 0.001) return vec3(0.0);
     float wet, storm, flash;
     evaluateWeatherState(wet, storm, flash);
-    float night = smoothstep(0.02, 0.16, vNightFactor) * vNightFactor
+    float night = smoothstep(0.58, 0.88, vNightFactor) * vNightFactor
+        * (1.0 - smoothstep(-0.08, -0.01, vSunWorldDir.y))
+        * (1.0 - evaluatePaleGardenWeight() * 0.85)
         * (1.0 - wet * 0.94) * (1.0 - storm * 0.95);
     if (night <= 0.0) return vec3(0.0);
 

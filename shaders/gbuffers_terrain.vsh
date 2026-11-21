@@ -55,6 +55,18 @@ bool isUpperTallGrass(int id) {
     return (id == 8105);
 }
 
+bool isHangingStrand(int id) {
+    return (id == 8107);
+}
+
+bool isWallVine(int id) {
+    return (id == 8108);
+}
+
+bool isUnderwaterFlora(int id) {
+    return (id == 8109);
+}
+
 vec3 evaluateMountainWind(vec3 worldPos, float time, float skyExposure, float stormBoost) {
     float gustTime = time * WIND_SPEED;
     vec2 windDir = normalize(vec2(0.82, 0.57));
@@ -73,7 +85,7 @@ vec3 evaluateMountainWind(vec3 worldPos, float time, float skyExposure, float st
     );
 }
 
-vec3 foliageDisplacement(vec3 worldPos, float animationTime, float skyExposure, float stormBoost, float profileWindScale, bool isTopVertex, float blockFractY, out float flex) {
+vec3 foliageDisplacement(vec3 worldPos, vec3 worldNormal, float animationTime, float skyExposure, float stormBoost, float profileWindScale, bool isTopVertex, float blockFractY, out float flex) {
     vec3 windOffset = vec3(0.0);
     flex = 0.0;
 
@@ -121,16 +133,45 @@ vec3 foliageDisplacement(vec3 worldPos, float animationTime, float skyExposure, 
         float anchorWeight = (isTopVertex || blockFractY > 0.25) ? 1.0 : 0.0;
         vec3 mountainWind = evaluateMountainWind(worldPos, animationTime * 1.25, skyExposure, stormBoost);
 
-        windOffset.xz = mountainWind.xz * 0.135 * anchorWeight * profileWindScale;
-        windOffset.y  = mountainWind.y * 0.06 * anchorWeight;
+        windOffset.xz = mountainWind.xz * 0.120 * anchorWeight * profileWindScale;
+        windOffset.y  = mountainWind.y * 0.05 * anchorWeight;
         flex = anchorWeight * clamp(length(windOffset.xz) * 5.0, 0.0, 1.0);
     } else if (isUpperTallGrass(vMaterialId)) {
-        float heightWeight = isTopVertex ? 1.85 : 1.0;
+        float heightWeight = isTopVertex ? 1.75 : 1.0;
         vec3 mountainWind = evaluateMountainWind(worldPos - vec3(0.0, 0.5, 0.0), animationTime * 1.25, skyExposure, stormBoost);
 
-        windOffset.xz = mountainWind.xz * 0.135 * heightWeight * profileWindScale;
-        windOffset.y  = -length(windOffset.xz) * 0.15;
+        windOffset.xz = mountainWind.xz * 0.120 * heightWeight * profileWindScale;
+        windOffset.y  = -length(windOffset.xz) * 0.14;
         flex = clamp(length(windOffset.xz) * 4.5, 0.0, 1.0);
+    } else if (isHangingStrand(vMaterialId)) {
+        // Top-anchored inverted pendulum: ceiling attachment stays pinned while bottom tip sways gently
+        float hangWeight = isTopVertex ? 0.12 : 1.0;
+        vec3 mountainWind = evaluateMountainWind(worldPos, animationTime * 1.05, max(skyExposure, 0.25), stormBoost);
+        windOffset.xz = mountainWind.xz * 0.075 * hangWeight * profileWindScale;
+        windOffset.y  = length(windOffset.xz) * 0.08;
+        flex = hangWeight * clamp(length(windOffset.xz) * 6.0, 0.0, 1.0);
+    } else if (isWallVine(vMaterialId)) {
+        // Wall-attached vine: micro-flutter tangent to or gently away from the block face (NEVER clips behind block!)
+        vec3 mountainWind = evaluateMountainWind(worldPos, animationTime * 1.10, skyExposure, stormBoost);
+        float microFlutter = sin(animationTime * 3.8 * WIND_SPEED + worldPos.x * 2.5 + worldPos.y * 2.1 + worldPos.z * 2.3) * 0.012;
+        vec3 rawOffset = vec3(mountainWind.x * 0.022 + microFlutter, 0.0, mountainWind.z * 0.022 - microFlutter) * profileWindScale;
+        vec3 n = (length(worldNormal) > 0.1) ? normalize(worldNormal) : vec3(0.0, 1.0, 0.0);
+        float alongN = dot(rawOffset, n);
+        // Clamp any inward motion into the supporting block to 0.0, and allow at most +0.024 outward lift
+        rawOffset += n * (clamp(alongN, 0.0, 0.024) - alongN);
+        windOffset = rawOffset * (isTopVertex ? 0.45 : 1.0);
+        flex = clamp(length(windOffset) * 14.0, 0.0, 1.0);
+    }
+    #endif
+
+    #ifdef WAVING_SUGARCANE
+    if (isUnderwaterFlora(vMaterialId)) {
+        float anchorWeight = (isTopVertex || blockFractY > 0.25) ? 1.0 : 0.0;
+        float tFlow = animationTime * 1.6 * WIND_SPEED;
+        float waveX = sin(tFlow + worldPos.x * 0.65 + worldPos.y * 0.85 + worldPos.z * 0.45);
+        float waveZ = cos(tFlow * 0.85 + worldPos.z * 0.65 - worldPos.y * 0.75 + worldPos.x * 0.40);
+        windOffset.xz = vec2(waveX, waveZ) * 0.070 * anchorWeight * profileWindScale;
+        flex = anchorWeight * clamp(length(windOffset.xz) * 6.0, 0.0, 1.0);
     }
     #endif
 
@@ -149,8 +190,9 @@ void main() {
     vMaterialId = int(floor(mc_Entity.x + 0.5));
     // Cross-model plants (grass, saplings, flowers, reeds, vines, or any 45-degree diagonal cross quad)
     // must use an upward normal (0, 1, 0) so they match the exact lighting and shadow of the ground block beneath them!
-    bool isCrossModelQuad = (vMaterialId == 8101 || vMaterialId == 8104 || vMaterialId == 8105)
-                         || (abs(gl_Normal.y) < 0.15 && abs(gl_Normal.x) > 0.20 && abs(gl_Normal.z) > 0.20);
+    // Wall-mounted vines (8108) keep their real face normal; cross-model plants use upward normal
+    bool isCrossModelQuad = (vMaterialId == 8101 || vMaterialId == 8104 || vMaterialId == 8105 || vMaterialId == 8107 || vMaterialId == 8109)
+                         || (vMaterialId != 8108 && abs(gl_Normal.y) < 0.15 && abs(gl_Normal.x) > 0.20 && abs(gl_Normal.z) > 0.20);
     vec3 effNormal = isCrossModelQuad ? vec3(0.0, 1.0, 0.0) : gl_Normal;
     vViewNormal = normalize(gl_NormalMatrix * effNormal);
 
@@ -166,10 +208,10 @@ void main() {
     bool isTopVertex = (vTexCoord.y < midCoord.y);
     float blockFractY = fract(worldPos.y + 0.001);
 
-    vec3 windOffset = foliageDisplacement(worldPos, frameTimeCounter, skyExposure, stormBoost, profileWindScale, isTopVertex, blockFractY, vWindFlex);
+    vec3 windOffset = foliageDisplacement(worldPos, gl_Normal, frameTimeCounter, skyExposure, stormBoost, profileWindScale, isTopVertex, blockFractY, vWindFlex);
 #if MOTION_BLUR > 0 || ANTI_ALIASING == 3
     float previousFlex;
-    vec3 previousWind = foliageDisplacement(worldPos, max(frameTimeCounter - frameTime, 0.0), skyExposure, stormBoost, profileWindScale, isTopVertex, blockFractY, previousFlex);
+    vec3 previousWind = foliageDisplacement(worldPos, gl_Normal, max(frameTimeCounter - frameTime, 0.0), skyExposure, stormBoost, profileWindScale, isTopVertex, blockFractY, previousFlex);
     vMotionDelta = windOffset - previousWind;
 #endif
 

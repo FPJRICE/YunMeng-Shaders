@@ -59,8 +59,11 @@ float classifyMaterialTag(int id, vec3 tintedAlbedo) {
         bool isBlossom = (tintedAlbedo.r > tintedAlbedo.g * 1.10 && tintedAlbedo.b > tintedAlbedo.g * 0.82);
         return isBlossom ? 0.75 : 0.25; // Cherry blossom vs leaves
     }
-    if (id == 8101 || id == 8104 || id == 8105) {
-        return 0.25; // Foliage & reeds
+    if (id == 8101 || id == 8104 || id == 8105 || id == 8107 || id == 8108 || id == 8109) {
+        return 0.25; // Foliage, reeds, vines & underwater flora
+    }
+    if (id == 8700) {
+        return 0.04; // Molten lava
     }
     return 0.00;
 }
